@@ -23,7 +23,7 @@ Core endpoints:
 - Zod request validation
 - Bearer API-key authentication for every non-health endpoint
 - Direct Dropbox HTTP API calls for read-only search and download
-- Text extraction for `.docx`, `.pdf`, `.txt`, `.md`, `.csv`, and `.xlsx`
+- Text extraction for `.docx`, `.pdf`, `.txt`, `.md`, `.csv`, `.xlsx`, and `.xls`
 - Keyword scoring for Version 1 excerpt search
 - Vitest + Supertest tests with a mocked Dropbox repository
 
@@ -104,6 +104,26 @@ Build check:
 pnpm run build
 ```
 
+## Local Dropbox archive indexing
+
+To scan the full approved grant archive and build a local report:
+
+```bash
+pnpm run index:dropbox
+```
+
+The indexer scans:
+
+- `/4 - Development/1 - Grants/2023 Grants`
+- `/4 - Development/1 - Grants/2024 Grants`
+- `/4 - Development/1 - Grants/2025 Grants`
+- `/4 - Development/1 - Grants/_2026 Grants`
+- `/4 - Development/1 - Grants/Grantwriting Resources`
+
+It writes a private searchable index and report to `work/index/`. These files are intentionally ignored by Git because they can contain real grant excerpts. The script is read-only against Dropbox: it lists and downloads files but never edits, moves, or deletes them.
+
+The report includes scanned/indexed/skipped/failed counts, file-level skip or parse reasons, counts by year/funder/document type, and sample search confirmations.
+
 ## Free Deployment to Vercel
 
 This repo includes `vercel.json` so it can run on Vercel's free Hobby plan for personal/small projects.
@@ -176,7 +196,9 @@ The Custom GPT should call this API to retrieve excerpts, then draft the final a
 ## Known limitations
 
 - Dropbox search may miss content in some file types.
+- Legacy `.doc` files are scanned and reported, but should be converted to `.docx` or PDF before they can be indexed safely.
 - PDF extraction quality may vary.
+- Image-only PDFs may need OCR before useful text can be indexed.
 - This API returns excerpts, not final grant answers.
 - Human review is still required for numbers, budgets, deadlines, and funder submission.
 - The API intentionally blocks sensitive folder patterns.
