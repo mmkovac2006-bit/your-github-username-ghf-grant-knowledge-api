@@ -48,3 +48,5 @@ export function createApp(options: CreateAppOptions = {}) {
 
   return app;
 }
+
+export default createApp();
