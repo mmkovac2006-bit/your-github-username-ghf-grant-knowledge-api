@@ -24,12 +24,16 @@ export async function extractTextFromBuffer(buffer: Buffer, fileName: string): P
     return buffer.toString("utf8");
   }
 
-  if (extension === ".xlsx") {
+  if ([".xlsx", ".xls"].includes(extension)) {
     const workbook = xlsx.read(buffer, { type: "buffer" });
     return workbook.SheetNames.map((sheetName) => {
       const sheet = workbook.Sheets[sheetName];
       return `Sheet: ${sheetName}\n${xlsx.utils.sheet_to_csv(sheet)}`;
     }).join("\n\n");
+  }
+
+  if (extension === ".doc") {
+    throw invalidRequestError("Legacy .doc files cannot be parsed safely by this service. Convert to .docx or PDF.");
   }
 
   throw invalidRequestError("Unsupported file type.");
