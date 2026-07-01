@@ -2,6 +2,8 @@
 
 Secure read-only middleware API for Grant Halliburton Foundation grant-writing source material stored in Dropbox. It is designed for GPT Actions: the API returns short excerpts with source metadata, and the Custom GPT drafts the final grant answer.
 
+Last deployment verification: July 1, 2026.
+
 ## Project overview
 
 The API searches approved Dropbox grant folders for prior proposal language, Copy folder language, grant reports, summaries, and program material. It does not expose Dropbox as a general file browser and does not return full documents.
