@@ -4,8 +4,8 @@ info:
   version: 1.0.0
   description: Secure read-only middleware API for retrieving short reusable grant-language excerpts from approved Dropbox folders.
 servers:
-  - url: https://your-render-service.onrender.com
-    description: Replace with the deployed Render service URL.
+  - url: https://your-github-username-ghf-grant-know.vercel.app
+    description: Vercel production deployment.
 security:
   - bearerAuth: []
 paths:
