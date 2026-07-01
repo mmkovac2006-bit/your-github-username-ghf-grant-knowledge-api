@@ -1,0 +1,312 @@
+openapi: 3.1.0
+info:
+  title: GHF Grant Knowledge API
+  version: 1.0.0
+  description: Secure read-only middleware API for retrieving short reusable grant-language excerpts from approved Dropbox folders.
+servers:
+  - url: https://your-render-service.onrender.com
+    description: Replace with the deployed Render service URL.
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Confirm the service is running.
+      security: []
+      responses:
+        "200":
+          description: Service status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, version]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+                  service:
+                    type: string
+                    const: GHF Grant Knowledge API
+                  version:
+                    type: string
+                    const: 1.0.0
+  /search_grant_language:
+    post:
+      operationId: searchGrantLanguage
+      summary: Search prior grant language for a grant portal question.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  description: Grant portal question to support with source excerpts.
+                category:
+                  type: string
+                  description: Optional common answer category.
+                character_limit:
+                  type: integer
+                  minimum: 1
+                  description: Character limit the GPT should honor when drafting the final answer.
+                funder:
+                  type: string
+                  description: Optional funder name.
+                preferred_years:
+                  type: string
+                  description: Optional year range, such as 2023-2026.
+                  default: 2023-2026
+                max_results:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  default: 5
+      responses:
+        "200":
+          description: Matching reusable source excerpts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [query, results]
+                properties:
+                  query:
+                    type: object
+                    required: [question, category, character_limit, funder, preferred_years]
+                    properties:
+                      question:
+                        type: string
+                      category:
+                        type: [string, "null"]
+                      character_limit:
+                        type: [integer, "null"]
+                      funder:
+                        type: [string, "null"]
+                      preferred_years:
+                        type: string
+                  results:
+                    type: array
+                    maxItems: 10
+                    items:
+                      $ref: "#/components/schemas/SearchResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /search_by_funder:
+    post:
+      operationId: searchByFunder
+      summary: Find prior grant material for a specific funder.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [funder]
+              properties:
+                funder:
+                  type: string
+                years:
+                  type: string
+                  default: 2023-2026
+                max_results:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  default: 5
+      responses:
+        "200":
+          description: Matching funder-specific source excerpts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [funder, results]
+                properties:
+                  funder:
+                    type: string
+                  results:
+                    type: array
+                    maxItems: 10
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/SearchResult"
+                        - type: object
+                          properties:
+                            grant_type:
+                              type: [string, "null"]
+                            amount_requested:
+                              type: [number, "null"]
+                            amount_awarded:
+                              type: [number, "null"]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /search_answer_category:
+    post:
+      operationId: searchAnswerCategory
+      summary: Search reusable answer-bank language by category.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category]
+              properties:
+                category:
+                  type: string
+                  enum:
+                    - organization overview
+                    - mission and history
+                    - population served
+                    - demographics
+                    - geographic area served
+                    - need statement
+                    - education programming
+                    - Peer Helpers
+                    - Peer Helpers PLUS
+                    - Thrive
+                    - HOPE Framework
+                    - Here For Texas
+                    - Navigation Line
+                    - outcomes and impact
+                    - evaluation
+                    - financial health
+                    - funding diversification
+                    - sustainability
+                    - partnerships
+                    - equity and access
+                    - organizational capacity
+                    - leadership
+                character_limit:
+                  type: integer
+                  minimum: 1
+                max_results:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  default: 5
+      responses:
+        "200":
+          description: Category examples from reusable source language.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [category, examples]
+                properties:
+                  category:
+                    type: string
+                  examples:
+                    type: array
+                    maxItems: 10
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/SearchResult"
+                        - type: object
+                          properties:
+                            needs_verification:
+                              type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /fetch_source_excerpt:
+    post:
+      operationId: fetchSourceExcerpt
+      summary: Fetch a longer topic-focused excerpt from one approved source file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, topic]
+              properties:
+                path:
+                  type: string
+                  description: Dropbox path returned by a previous search result.
+                topic:
+                  type: string
+                max_characters:
+                  type: integer
+                  minimum: 1
+                  maximum: 2000
+                  default: 2000
+      responses:
+        "200":
+          description: Longer source excerpt only.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source_file, path, topic, excerpt, character_count, notes]
+                properties:
+                  source_file:
+                    type: string
+                  path:
+                    type: string
+                  topic:
+                    type: string
+                  excerpt:
+                    type: string
+                  character_count:
+                    type: integer
+                  notes:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Restricted path blocked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    SearchResult:
+      type: object
+      required: [source_file, path, excerpt, confidence]
+      properties:
+        source_file:
+          type: string
+        funder:
+          type: [string, "null"]
+        year:
+          type: [string, "null"]
+        path:
+          type: string
+        excerpt:
+          type: string
+          maxLength: 2000
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        document_type:
+          type: [string, "null"]
+        character_count:
+          type: integer
+        notes:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
