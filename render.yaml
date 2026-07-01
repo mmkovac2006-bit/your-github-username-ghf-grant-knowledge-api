@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: ghf-grant-knowledge-api
+    runtime: node
+    plan: starter
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build
+    startCommand: pnpm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GHF_ACTION_API_KEY
+        sync: false
+      - key: DROPBOX_CLIENT_ID
+        sync: false
+      - key: DROPBOX_CLIENT_SECRET
+        sync: false
+      - key: DROPBOX_REFRESH_TOKEN
+        sync: false
+      - key: DROPBOX_NAMESPACE_ID
+        value: "5698749680"
+      - key: DROPBOX_ALLOWED_ROOT
+        value: /4 - Development/1 - Grants
+      - key: MAX_RESULTS_DEFAULT
+        value: "5"
+      - key: MAX_RESULTS_LIMIT
+        value: "10"
+      - key: MAX_EXCERPT_CHARS
+        value: "2000"
+      - key: REQUEST_TIMEOUT_MS
+        value: "20000"
+      - key: LOG_LEVEL
+        value: info
