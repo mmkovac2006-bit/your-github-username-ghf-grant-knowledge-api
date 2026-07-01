@@ -111,7 +111,7 @@ This repo includes `render.yaml`.
 3. Use the included build command:
 
 ```bash
-corepack enable && pnpm install --frozen-lockfile && pnpm run build
+corepack enable && pnpm install && pnpm run build
 ```
 
 4. Use the start command:
