@@ -4,3 +4,7 @@ dist/
 .DS_Store
 coverage/
 npm-debug.log*
+work/
+outputs/index/
+*.local-index.json
+*.index-report.json
