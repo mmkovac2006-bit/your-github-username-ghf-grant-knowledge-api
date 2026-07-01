@@ -3,7 +3,7 @@ services:
     name: ghf-grant-knowledge-api
     runtime: node
     plan: starter
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build
+    buildCommand: corepack enable && pnpm install && pnpm run build
     startCommand: pnpm start
     healthCheckPath: /health
     envVars:
