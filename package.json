@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "index:dropbox": "tsx scripts/indexDropboxArchive.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest"
