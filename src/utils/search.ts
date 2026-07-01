@@ -1,6 +1,11 @@
-import path from "node:path";
 import type { Confidence, FileCandidate } from "../types/search";
 import { getCategoryTerms } from "./categories";
+import {
+  inferDocumentTypeFromText,
+  inferFunderFromPath,
+  inferYearFromPath,
+  isExtractableExtension
+} from "./documentMetadata";
 import { BLOCKED_PATTERNS } from "./security";
 
 const STOP_WORDS = new Set([
@@ -29,10 +34,8 @@ const STOP_WORDS = new Set([
   "your"
 ]);
 
-const SUPPORTED_EXTENSIONS = new Set([".docx", ".pdf", ".txt", ".md", ".csv", ".xlsx"]);
-
 export function isSupportedFile(fileName: string): boolean {
-  return SUPPORTED_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+  return isExtractableExtension(fileName);
 }
 
 export function tokenize(value: string): string[] {
@@ -111,19 +114,13 @@ export function clampPositiveInteger(value: number | undefined, defaultValue: nu
 
 export function extractYear(candidate: FileCandidate | string): string | null {
   const value = typeof candidate === "string" ? candidate : `${candidate.path} ${candidate.source_file}`;
-  const match = value.match(/\b(20\d{2})\b/);
-  return match?.[1] ?? null;
+  return inferYearFromPath(value);
 }
 
 export function inferFunder(candidate: FileCandidate): string | null {
-  const segments = candidate.path.split("/").filter(Boolean);
-  const yearFolderIndex = segments.findIndex((segment) => /20\d{2}\s+grants/i.test(segment));
-
-  if (yearFolderIndex >= 0 && segments[yearFolderIndex + 1]) {
-    const funder = segments[yearFolderIndex + 1];
-    if (!/copy|grantwriting resources|reports?/i.test(funder)) {
-      return funder;
-    }
+  const pathFunder = inferFunderFromPath(candidate.path);
+  if (pathFunder && !/grantwriting resources/i.test(pathFunder)) {
+    return pathFunder;
   }
 
   const cleaned = candidate.source_file
@@ -138,28 +135,7 @@ export function inferFunder(candidate: FileCandidate): string | null {
 }
 
 export function inferDocumentType(candidate: FileCandidate): string {
-  const value = `${candidate.path} ${candidate.source_file}`.toLowerCase();
-
-  if (value.includes("report")) {
-    return "grant_report";
-  }
-  if (value.includes("summary")) {
-    return "grant_summary";
-  }
-  if (value.includes("copy")) {
-    return "reusable_copy";
-  }
-  if (value.includes("application") || value.includes("proposal")) {
-    return "past_grant_application";
-  }
-  if (value.includes("program")) {
-    return "program_material";
-  }
-  if (value.includes("successful") || value.includes("funded")) {
-    return "successful_grant";
-  }
-
-  return "source_document";
+  return inferDocumentTypeFromText(`${candidate.path} ${candidate.source_file}`);
 }
 
 export function candidatePriority(candidate: FileCandidate): number {
@@ -177,6 +153,9 @@ export function candidatePriority(candidate: FileCandidate): number {
   if (value.includes("application") || value.includes("proposal")) score += 4;
   if (value.includes("report")) score += 4;
   if (value.includes("summary")) score += 4;
+  if (value.includes("budget narrative")) score += 4;
+  if (value.includes("loi") || value.includes("letter of inquiry")) score += 4;
+  if (value.includes("renewal")) score += 4;
   if (value.includes("program")) score += 3;
   if (candidate.server_modified) score += 1;
 
