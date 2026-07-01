@@ -102,6 +102,24 @@ Build check:
 pnpm run build
 ```
 
+## Free Deployment to Vercel
+
+This repo includes `vercel.json` so it can run on Vercel's free Hobby plan for personal/small projects.
+
+1. Sign in at https://vercel.com with GitHub.
+2. Choose Add New Project.
+3. Import this GitHub repository.
+4. Add these environment variables:
+   - `GHF_ACTION_API_KEY`
+   - `DROPBOX_CLIENT_ID`
+   - `DROPBOX_CLIENT_SECRET`
+   - `DROPBOX_REFRESH_TOKEN`
+   - `DROPBOX_NAMESPACE_ID=5698749680`
+   - `DROPBOX_ALLOWED_ROOT=/4 - Development/1 - Grants`
+   - `NODE_ENV=production`
+5. Deploy.
+6. Confirm `/health` works on the Vercel URL.
+
 ## Deployment to Render
 
 This repo includes `render.yaml`.
@@ -123,13 +141,11 @@ pnpm start
 5. Add all required environment variables in Render.
 6. Confirm `GET /health` returns the expected JSON.
 
-Vercel note: this Express app is Render-first. Vercel is feasible, but would need a small serverless adapter or API route wrapper before deployment.
-
 ## GPT Builder Action setup
 
 1. Deploy the API.
 2. Open `openapi/ghf-grant-knowledge-api.yaml`.
-3. Replace the placeholder server URL with the deployed Render URL.
+3. Replace the placeholder server URL with the deployed Vercel or Render URL.
 4. Paste the schema into GPT Builder Actions.
 5. Configure authentication as bearer token auth using the same value as `GHF_ACTION_API_KEY`.
 6. Test actions from GPT Builder with a safe prompt such as: "Find previous language about demographics."
