@@ -63,10 +63,12 @@ Important values:
 - `DROPBOX_REFRESH_TOKEN`: server-side refresh token.
 - `DROPBOX_NAMESPACE_ID`: optional shared/team namespace ID. For GHF, this may be `5698749680`.
 - `DROPBOX_ALLOWED_ROOT`: defaults to `/4 - Development/1 - Grants`.
+- `SEARCH_BACKEND`: `dropbox` or `database`.
+- `DATABASE_URL`: private Postgres/Supabase connection string used when `SEARCH_BACKEND=database`.
 - `MAX_RESULTS_LIMIT`: hard cap for returned search results.
 - `MAX_EXCERPT_CHARS`: hard cap for returned excerpts.
 
-Never commit `.env`, Dropbox tokens, app secrets, or real API keys.
+Never commit `.env`, Dropbox tokens, app secrets, real API keys, or database URLs.
 
 For GHF's shared grant archive, set `DROPBOX_NAMESPACE_ID` and keep `DROPBOX_ALLOWED_ROOT` as the path inside that namespace. Do not include `/D` and do not add a trailing slash.
 
@@ -124,6 +126,43 @@ It writes a private searchable index and report to `work/index/`. These files ar
 
 The report includes scanned/indexed/skipped/failed counts, file-level skip or parse reasons, counts by year/funder/document type, and sample search confirmations.
 
+## Private database search
+
+For faster and more complete search, load the local Dropbox archive index into a private Postgres database such as Supabase.
+
+1. Create a Supabase project.
+2. In Supabase, open Connect and copy the Transaction pooler connection string.
+3. Add the connection string to `.env` as `DATABASE_URL`.
+4. Create the database tables:
+
+```bash
+pnpm run db:setup
+```
+
+5. If needed, refresh the local Dropbox index:
+
+```bash
+pnpm run index:dropbox
+```
+
+6. Import the private local index into the database:
+
+```bash
+pnpm run db:import-index
+```
+
+7. Switch local search to the private database:
+
+```bash
+SEARCH_BACKEND=database
+```
+
+8. On Vercel, add the same `DATABASE_URL` secret and set `SEARCH_BACKEND=database`, then redeploy.
+
+Use `GET /debug/database` with the same bearer API key to confirm the database is connected and contains indexed documents/chunks.
+
+The database stores grant excerpts, so do not expose `DATABASE_URL`, do not put the generated index in GitHub, and do not use browser/client-side Supabase keys for this search API.
+
 ## Free Deployment to Vercel
 
 This repo includes `vercel.json` so it can run on Vercel's free Hobby plan for personal/small projects.
@@ -138,6 +177,8 @@ This repo includes `vercel.json` so it can run on Vercel's free Hobby plan for p
    - `DROPBOX_REFRESH_TOKEN`
    - `DROPBOX_NAMESPACE_ID=5698749680`
    - `DROPBOX_ALLOWED_ROOT=/4 - Development/1 - Grants`
+   - `SEARCH_BACKEND=database` after the private database import is complete
+   - `DATABASE_URL` after the private database import is complete
    - `NODE_ENV=production`
 5. Deploy.
 6. Confirm `/health` works on the Vercel URL.
@@ -191,7 +232,8 @@ The Custom GPT should call this API to retrieve excerpts, then draft the final a
 - If Dropbox searches return `{}` or no matches with no obvious error, check that `DROPBOX_NAMESPACE_ID` is set for the shared/team namespace.
 - If Dropbox returns `files/search_v2 invalid_argument`, remove any trailing slash from `DROPBOX_ALLOWED_ROOT`.
 - If authentication works but no files appear, run `GET /debug/dropbox` locally.
-- If secrets were exposed in screenshots or logs, rotate the Dropbox App secret and refresh token before deployment.
+- If database search returns no results, run `GET /debug/database` and confirm the document/chunk counts are nonzero.
+- If secrets were exposed in screenshots or logs, rotate the Dropbox App secret, refresh token, API key, and database password before deployment.
 
 ## Known limitations
 
