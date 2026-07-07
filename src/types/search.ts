@@ -52,10 +52,25 @@ export type DropboxDiagnostic = {
   notes: string[];
 };
 
+export type DatabaseDiagnostic = {
+  configured: {
+    backend: "dropbox" | "database";
+    database_url: boolean;
+  };
+  connection_check: Record<string, unknown>;
+  index_counts: {
+    documents: number;
+    chunks: number;
+  };
+  lyda_hill_search: Record<string, unknown>;
+  notes: string[];
+};
+
 export interface SourceRepository {
   searchFiles(input: SourceSearchInput): Promise<SourceSearchResult>;
   downloadText(path: string): Promise<DownloadedText>;
   diagnoseDropbox?(): Promise<DropboxDiagnostic>;
+  diagnoseDatabase?(): Promise<DatabaseDiagnostic>;
 }
 
 export type ServiceMeta = {
