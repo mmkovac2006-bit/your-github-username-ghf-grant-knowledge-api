@@ -34,6 +34,15 @@ async function main(): Promise<void> {
   const sql = createDatabaseClient(config);
   const indexPath = path.resolve(process.env.INDEX_FILE_PATH ?? "work/index/grant-document-index.local-index.json");
   const index = JSON.parse(await fs.readFile(indexPath, "utf8")) as LocalIndex;
+  const minimumDocuments = readPositiveInteger("MIN_INDEX_DOCUMENTS", 1);
+  const minimumChunks = readPositiveInteger("MIN_INDEX_CHUNKS", 1);
+  const chunkCount = index.documents.reduce((sum, document) => sum + document.chunks.length, 0);
+
+  if (index.documents.length < minimumDocuments || chunkCount < minimumChunks) {
+    throw new Error(
+      `Refusing to import incomplete-looking index: ${index.documents.length} documents and ${chunkCount} chunks.`
+    );
+  }
 
   try {
     await sql.begin(async (tx) => {
@@ -119,3 +128,13 @@ main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : "Database import failed.");
   process.exitCode = 1;
 });
+
+function readPositiveInteger(name: string, fallback: number): number {
+  const value = process.env[name];
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
