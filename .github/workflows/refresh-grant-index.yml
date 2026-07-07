@@ -1,0 +1,71 @@
+name: Refresh grant database index
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub schedules use UTC. This is early morning in US Central time.
+    - cron: "17 9 * * *"
+
+concurrency:
+  group: grant-index-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Rebuild Dropbox index and import to database
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    env:
+      NODE_ENV: production
+      DROPBOX_CLIENT_ID: ${{ secrets.DROPBOX_CLIENT_ID }}
+      DROPBOX_CLIENT_SECRET: ${{ secrets.DROPBOX_CLIENT_SECRET }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+      DROPBOX_NAMESPACE_ID: ${{ secrets.DROPBOX_NAMESPACE_ID }}
+      DROPBOX_ALLOWED_ROOT: /4 - Development/1 - Grants
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_MAX_CONNECTIONS: 3
+      REQUEST_TIMEOUT_MS: 60000
+      MIN_INDEX_DOCUMENTS: 500
+      MIN_INDEX_CHUNKS: 1000
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.7.0"
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          missing=0
+          for name in DROPBOX_CLIENT_ID DROPBOX_CLIENT_SECRET DROPBOX_REFRESH_TOKEN DROPBOX_NAMESPACE_ID DATABASE_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required GitHub Actions secret: $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Build project
+        run: pnpm run build
+
+      - name: Ensure database schema exists
+        run: pnpm run db:setup
+
+      - name: Build private Dropbox index
+        run: pnpm run index:dropbox
+
+      - name: Import index into database
+        run: pnpm run db:import-index
