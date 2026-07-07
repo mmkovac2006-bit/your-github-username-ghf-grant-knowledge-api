@@ -15,6 +15,44 @@ function asyncHandler(handler: AsyncHandler) {
 export function createDebugRouter(config: AppConfig, sourceRepository: SourceRepository) {
   const router = Router();
 
+  router.get("/debug/database", asyncHandler(async (_req, res) => {
+    res.locals.logContext = {
+      diagnostic: "database"
+    };
+
+    if (sourceRepository.diagnoseDatabase) {
+      const diagnostic = await sourceRepository.diagnoseDatabase();
+      res.locals.resultCount = Number(diagnostic.lyda_hill_search.result_count ?? 0);
+      res.json(diagnostic);
+      return;
+    }
+
+    res.json({
+      configured: {
+        backend: config.searchBackend,
+        database_url: Boolean(config.databaseUrl)
+      },
+      connection_check: {
+        ok: false,
+        skipped: "Database diagnostics are unavailable because the active source is Dropbox."
+      },
+      index_counts: {
+        documents: 0,
+        chunks: 0
+      },
+      lyda_hill_search: {
+        ok: false,
+        query: "Lyda Hill",
+        result_count: 0,
+        sample_paths: [],
+        skipped: "Database diagnostics are unavailable because the active source is Dropbox."
+      },
+      notes: [
+        "Set SEARCH_BACKEND=database and DATABASE_URL to use the private database index."
+      ]
+    });
+  }));
+
   router.get("/debug/dropbox", asyncHandler(async (_req, res) => {
     res.locals.logContext = {
       diagnostic: "dropbox"
