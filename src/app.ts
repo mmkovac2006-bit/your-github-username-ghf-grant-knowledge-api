@@ -4,6 +4,7 @@ import { createHealthRouter } from "./routes/health";
 import { createSearchRouter } from "./routes/search";
 import { DropboxRepository } from "./services/dropboxRepository";
 import { GrantSearchService } from "./services/grantSearchService";
+import { PostgresRepository } from "./services/postgresRepository";
 import type { SourceRepository } from "./types/search";
 import { createConfig, type AppConfig } from "./utils/config";
 import { errorHandler } from "./utils/errors";
@@ -19,7 +20,7 @@ export type CreateAppOptions = {
 
 export function createApp(options: CreateAppOptions = {}) {
   const config = options.config ?? createConfig();
-  const sourceRepository = options.sourceRepository ?? new DropboxRepository(config);
+  const sourceRepository = options.sourceRepository ?? createSourceRepository(config);
   const searchService = new GrantSearchService(sourceRepository, config);
   const app = express();
 
@@ -47,6 +48,14 @@ export function createApp(options: CreateAppOptions = {}) {
   app.use(errorHandler);
 
   return app;
+}
+
+function createSourceRepository(config: AppConfig): SourceRepository {
+  if (config.searchBackend === "database" && config.databaseUrl) {
+    return new PostgresRepository(config);
+  }
+
+  return new DropboxRepository(config);
 }
 
 export default createApp();
