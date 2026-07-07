@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "db:setup": "tsx scripts/setupDatabase.ts",
+    "db:import-index": "tsx scripts/importIndexToDatabase.ts",
     "index:dropbox": "tsx scripts/indexDropboxArchive.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
@@ -25,6 +27,7 @@
     "express": "^4.21.2",
     "mammoth": "^1.8.0",
     "pdf-parse": "^1.1.1",
+    "postgres": "^3.4.9",
     "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
