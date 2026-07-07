@@ -163,6 +163,29 @@ Use `GET /debug/database` with the same bearer API key to confirm the database i
 
 The database stores grant excerpts, so do not expose `DATABASE_URL`, do not put the generated index in GitHub, and do not use browser/client-side Supabase keys for this search API.
 
+## Scheduled database refresh
+
+The GitHub Actions workflow at `.github/workflows/refresh-grant-index.yml` refreshes the private database index every day and can also be run manually from the GitHub Actions tab.
+
+Add these repository secrets in GitHub under Settings > Secrets and variables > Actions:
+
+- `DROPBOX_CLIENT_ID`
+- `DROPBOX_CLIENT_SECRET`
+- `DROPBOX_REFRESH_TOKEN`
+- `DROPBOX_NAMESPACE_ID`
+- `DATABASE_URL`
+
+The workflow:
+
+1. Installs dependencies.
+2. Checks that required secrets are present.
+3. Builds the project.
+4. Ensures the database schema exists.
+5. Rebuilds the Dropbox index.
+6. Imports the index into the private database.
+
+It does not commit or upload the generated index. The import step also refuses to replace the database if the newly generated index has fewer than `MIN_INDEX_DOCUMENTS` documents or fewer than `MIN_INDEX_CHUNKS` chunks.
+
 ## Free Deployment to Vercel
 
 This repo includes `vercel.json` so it can run on Vercel's free Hobby plan for personal/small projects.
@@ -233,7 +256,7 @@ The Custom GPT should call this API to retrieve excerpts, then draft the final a
 - If Dropbox returns `files/search_v2 invalid_argument`, remove any trailing slash from `DROPBOX_ALLOWED_ROOT`.
 - If authentication works but no files appear, run `GET /debug/dropbox` locally.
 - If database search returns no results, run `GET /debug/database` and confirm the document/chunk counts are nonzero.
-- If secrets were exposed in screenshots or logs, rotate the Dropbox App secret, refresh token, API key, and database password before deployment.
+- If secrets were exposed in screenshots or logs, rotate the Dropbox App secret and refresh token before deployment.
 
 ## Known limitations
 
