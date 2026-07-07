@@ -12,6 +12,9 @@ const envSchema = z.object({
   DROPBOX_REFRESH_TOKEN: z.string().default(""),
   DROPBOX_NAMESPACE_ID: z.string().default(""),
   DROPBOX_ALLOWED_ROOT: z.string().default("/4 - Development/1 - Grants"),
+  SEARCH_BACKEND: z.enum(["dropbox", "database"]).default("dropbox"),
+  DATABASE_URL: z.string().default(""),
+  DATABASE_MAX_CONNECTIONS: z.coerce.number().int().positive().default(3),
   MAX_RESULTS_DEFAULT: z.coerce.number().int().positive().default(5),
   MAX_RESULTS_LIMIT: z.coerce.number().int().positive().default(10),
   MAX_EXCERPT_CHARS: z.coerce.number().int().positive().default(2000),
@@ -28,6 +31,9 @@ export type AppConfig = {
   dropboxRefreshToken: string;
   dropboxNamespaceId: string;
   dropboxAllowedRoot: string;
+  searchBackend: "dropbox" | "database";
+  databaseUrl: string;
+  databaseMaxConnections: number;
   maxResultsDefault: number;
   maxResultsLimit: number;
   maxExcerptChars: number;
@@ -53,6 +59,9 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dropboxRefreshToken: parsed.DROPBOX_REFRESH_TOKEN,
     dropboxNamespaceId: parsed.DROPBOX_NAMESPACE_ID.trim(),
     dropboxAllowedRoot: normalizeConfiguredDropboxPath(parsed.DROPBOX_ALLOWED_ROOT),
+    searchBackend: parsed.SEARCH_BACKEND,
+    databaseUrl: parsed.DATABASE_URL.trim(),
+    databaseMaxConnections: parsed.DATABASE_MAX_CONNECTIONS,
     maxResultsDefault: parsed.MAX_RESULTS_DEFAULT,
     maxResultsLimit: parsed.MAX_RESULTS_LIMIT,
     maxExcerptChars: parsed.MAX_EXCERPT_CHARS,
