@@ -9,7 +9,7 @@ import type {
 import type { AppConfig } from "../utils/config";
 import { createDatabaseClient } from "../utils/database";
 import { upstreamError } from "../utils/errors";
-import { isBlockedPath, isInsideAllowedRoot, normalizeDropboxPath } from "../utils/security";
+import { isBlockedPath, isInsideAllowedRoots, normalizeDropboxPath } from "../utils/security";
 import { tokenize, uniqueTerms } from "../utils/search";
 
 type CandidateRow = {
@@ -40,10 +40,18 @@ export class PostgresRepository implements SourceRepository {
 
   async searchFiles(input: SourceSearchInput): Promise<SourceSearchResult> {
     const queryText = this.toWebsearchQuery(input.terms);
+    const allowedRootsJson = JSON.stringify(this.config.dropboxAllowedRoots);
+    const candidateLimit = Math.max(input.maxCandidates, input.maxCandidates * this.config.dropboxAllowedRoots.length * 2);
 
     try {
       const rows = await this.sql<CandidateRow[]>`
-        with query as (
+        with allowed_roots as (
+          select
+            value as root,
+            value || '/' as root_prefix
+          from jsonb_array_elements_text(${allowedRootsJson}::jsonb)
+        ),
+        query as (
           select websearch_to_tsquery('english', ${queryText}) as value
         ),
         ranked as (
@@ -56,19 +64,25 @@ export class PostgresRepository implements SourceRepository {
           from grant_documents d
           join grant_chunks c on c.path = d.path
           cross join query
-          where (d.search_text || c.search_text) @@ query.value
+          where exists (
+            select 1
+            from allowed_roots ar
+            where d.path = ar.root or left(d.path, length(ar.root_prefix)) = ar.root_prefix
+          )
+          and (d.search_text || c.search_text) @@ query.value
           group by d.source_file, d.path, d.server_modified, d.size_bytes
         )
         select source_file, path, server_modified, size, rank
         from ranked
         order by rank desc, server_modified desc nulls last, source_file asc
-        limit ${input.maxCandidates}
+        limit ${candidateLimit}
       `;
 
       return {
         files: rows
           .map((row) => this.toCandidate(row))
-          .filter((candidate) => this.isCandidateAllowed(candidate)),
+          .filter((candidate) => this.isCandidateAllowed(candidate))
+          .slice(0, input.maxCandidates),
         restrictedSkipped: 0
       };
     } catch {
@@ -79,7 +93,7 @@ export class PostgresRepository implements SourceRepository {
   async downloadText(path: string): Promise<DownloadedText> {
     const normalizedPath = normalizeDropboxPath(path);
 
-    if (!isInsideAllowedRoot(normalizedPath, this.config.dropboxAllowedRoot) || isBlockedPath(normalizedPath)) {
+    if (!isInsideAllowedRoots(normalizedPath, this.config.dropboxAllowedRoots) || isBlockedPath(normalizedPath)) {
       throw upstreamError();
     }
 
@@ -146,10 +160,33 @@ export class PostgresRepository implements SourceRepository {
     }
 
     try {
+      const allowedRootsJson = JSON.stringify(this.config.dropboxAllowedRoots);
       const counts = await this.sql<CountRow[]>`
+        with allowed_roots as (
+          select
+            value as root,
+            value || '/' as root_prefix
+          from jsonb_array_elements_text(${allowedRootsJson}::jsonb)
+        )
         select
-          (select count(*)::int from grant_documents) as documents,
-          (select count(*)::int from grant_chunks) as chunks
+          (
+            select count(*)::int
+            from grant_documents d
+            where exists (
+              select 1
+              from allowed_roots ar
+              where d.path = ar.root or left(d.path, length(ar.root_prefix)) = ar.root_prefix
+            )
+          ) as documents,
+          (
+            select count(*)::int
+            from grant_chunks c
+            where exists (
+              select 1
+              from allowed_roots ar
+              where c.path = ar.root or left(c.path, length(ar.root_prefix)) = ar.root_prefix
+            )
+          ) as chunks
       `;
 
       diagnostic.connection_check = { ok: true };
@@ -200,7 +237,7 @@ export class PostgresRepository implements SourceRepository {
   }
 
   private isCandidateAllowed(candidate: FileCandidate): boolean {
-    return isInsideAllowedRoot(candidate.path, this.config.dropboxAllowedRoot) && !isBlockedPath(candidate.path);
+    return isInsideAllowedRoots(candidate.path, this.config.dropboxAllowedRoots) && !isBlockedPath(candidate.path);
   }
 
   private toWebsearchQuery(terms: string[]): string {

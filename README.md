@@ -1,282 +1,233 @@
 # GHF Grant Knowledge API
 
-Secure read-only middleware API for Grant Halliburton Foundation grant-writing source material stored in Dropbox. It is designed for GPT Actions: the API returns short excerpts with source metadata, and the Custom GPT drafts the final grant answer.
+Version 1 is intentionally simple:
 
-Last deployment verification: July 1, 2026.
+Kevin pastes a grant question or full grant application into the Custom GPT. The GPT calls this API. The API searches only approved past grant and grantwriting folders in Dropbox, prioritizes relevant and newer material, and returns short source excerpts. The GPT uses those excerpts to fill out the grant with no extra commentary.
 
-## Project overview
+Dropbox is the live master database for v1. This API does not use Supabase, Postgres, a private database, a vector database, a separate document store, a copied grant database, or a background ingestion pipeline for v1 search.
 
-The API searches approved Dropbox grant folders for prior proposal language, Copy folder language, grant reports, summaries, and program material. It does not expose Dropbox as a general file browser and does not return full documents.
+## How It Works
 
-Core endpoints:
+1. Kevin pastes one grant question or a full grant application into the Custom GPT.
+2. The Custom GPT sends one authenticated request to `POST /search` with `{ "query": "..." }`.
+3. This middleware searches Dropbox directly, using only the approved server-side folder allowlist.
+4. The API returns compact source excerpts with file name, safe path, folder/category, year, rank, and excerpt.
+5. The Custom GPT writes the final paste-ready grant answers.
 
-- `GET /health`
-- `POST /search_grant_language`
-- `POST /search_by_funder`
-- `POST /search_answer_category`
-- `POST /fetch_source_excerpt`
-- `GET /debug/dropbox` for protected local Dropbox diagnostics
+The API retrieves and ranks source excerpts only. The Custom GPT is responsible for the final wording.
 
-## Architecture
+## Approved Dropbox Folders
 
-- Express + TypeScript API
-- Zod request validation
-- Bearer API-key authentication for every non-health endpoint
-- Direct Dropbox HTTP API calls for read-only search and download
-- Text extraction for `.docx`, `.pdf`, `.txt`, `.md`, `.csv`, `.xlsx`, and `.xls`
-- Keyword scoring for Version 1 excerpt search
-- Vitest + Supertest tests with a mocked Dropbox repository
+The server always searches only these folders:
 
-## Local setup
+- `/4 - Development/1 - Grants/_2026 Grants`
+- `/4 - Development/1 - Grants/2025 Grants`
+- `/4 - Development/1 - Grants/2024 Grants`
+- `/4 - Development/1 - Grants/Grantwriting Resources`
 
-1. Install Node.js 20+.
-2. Install dependencies:
+Kevin and the GPT do not choose folders, years, paths, Dropbox roots, namespaces, search locations, databases, or source systems. If a request includes those fields, v1 ignores them for search scope. The allowlist is enforced in middleware, and results outside the approved folders are filtered out.
+
+Restricted-folder blocking and path safety checks still apply.
+
+## Authentication
+
+- `/health` is public.
+- All search and debug endpoints require `Authorization: Bearer <GHF_ACTION_API_KEY>`.
+- The Custom GPT Action stores and sends that bearer token.
+- Kevin does not authenticate with Dropbox.
+- Dropbox app key, app secret, refresh token, and optional namespace ID live only in server environment variables.
+- If ChatGPT asks Kevin to allow the Action call, that should be the only user-facing permission step.
+
+## Environment Variables
+
+Copy `.env.example` to `.env` for local development.
+
+Required:
+
+```bash
+GHF_ACTION_API_KEY=replace_with_long_random_secret
+DROPBOX_APP_KEY=replace_with_dropbox_app_key
+DROPBOX_APP_SECRET=replace_with_dropbox_app_secret
+DROPBOX_REFRESH_TOKEN=replace_with_refresh_token
+DROPBOX_ALLOWED_ROOTS="/4 - Development/1 - Grants/_2026 Grants|/4 - Development/1 - Grants/2025 Grants|/4 - Development/1 - Grants/2024 Grants|/4 - Development/1 - Grants/Grantwriting Resources"
+```
+
+Optional shared/team namespace:
+
+```bash
+DROPBOX_PATH_ROOT_NAMESPACE_ID=5698749680
+```
+
+Limits:
+
+```bash
+MAX_RESULTS_DEFAULT=5
+MAX_RESULTS_LIMIT=10
+MAX_EXCERPT_CHARS=2000
+REQUEST_TIMEOUT_MS=20000
+```
+
+The app also accepts older Dropbox env names as fallbacks, but v1 docs and deployment config use the names above.
+
+Do not put real secrets in Git.
+
+## Namespace Setup
+
+For GHF's shared Dropbox grants namespace, set:
+
+```bash
+DROPBOX_PATH_ROOT_NAMESPACE_ID=5698749680
+```
+
+Do not include `/D` in the approved folder paths. The API normalizes leading/trailing slashes and avoids trailing-slash search bugs.
+
+If this variable is not set, the app still works for a normal Dropbox account where the approved folders are visible.
+
+## Run Locally
+
+Install dependencies:
 
 ```bash
 pnpm install
 ```
 
-3. Create a local env file:
-
-```bash
-cp .env.example .env
-```
-
-4. Fill in `.env` with the API key and Dropbox OAuth values.
-5. Start local development:
+Start the API:
 
 ```bash
 pnpm dev
 ```
 
-The API runs on `http://localhost:3000` unless `PORT` is changed.
+Default local URL:
 
-## Environment variables
-
-See `.env.example` for the full list.
-
-Important values:
-
-- `GHF_ACTION_API_KEY`: long random secret used by GPT Actions as a bearer token.
-- `DROPBOX_CLIENT_ID`: Dropbox app key.
-- `DROPBOX_CLIENT_SECRET`: Dropbox app secret.
-- `DROPBOX_REFRESH_TOKEN`: server-side refresh token.
-- `DROPBOX_NAMESPACE_ID`: optional shared/team namespace ID. For GHF, this may be `5698749680`.
-- `DROPBOX_ALLOWED_ROOT`: defaults to `/4 - Development/1 - Grants`.
-- `SEARCH_BACKEND`: `dropbox` or `database`.
-- `DATABASE_URL`: private Postgres/Supabase connection string used when `SEARCH_BACKEND=database`.
-- `MAX_RESULTS_LIMIT`: hard cap for returned search results.
-- `MAX_EXCERPT_CHARS`: hard cap for returned excerpts.
-
-Never commit `.env`, Dropbox tokens, app secrets, real API keys, or database URLs.
-
-For GHF's shared grant archive, set `DROPBOX_NAMESPACE_ID` and keep `DROPBOX_ALLOWED_ROOT` as the path inside that namespace. Do not include `/D` and do not add a trailing slash.
-
-## Dropbox setup
-
-1. Create a Dropbox app in the Dropbox App Console.
-2. Use the minimum scopes needed to search/list and download files.
-3. Configure the app for read-only access where Dropbox permissions allow it.
-4. Generate an OAuth refresh token for the account that can access the approved grant folders.
-5. Store the app key, app secret, and refresh token as environment variables on the server.
-
-The code only calls Dropbox search, OAuth refresh, and file download endpoints. It does not write, move, delete, or upload Dropbox files.
-
-## Local Dropbox diagnostics
-
-After starting the local server, call the protected diagnostic endpoint with the same bearer API key used by the search endpoints:
-
-```bash
-curl -H "Authorization: Bearer <GHF_ACTION_API_KEY>" http://localhost:3000/debug/dropbox
+```text
+http://localhost:3000
 ```
 
-The response only reports sanitized checks: whether Dropbox credentials and namespace ID are configured, whether account/root checks worked, and whether a small `Lyda Hill` search found files.
-
-## Running tests
+## Test
 
 ```bash
 pnpm test
-```
-
-The tests use `tests/mockDropboxRepository.ts`, so no real Dropbox credentials are required.
-
-Build check:
-
-```bash
 pnpm run build
 ```
 
-## Local Dropbox archive indexing
+There is no v1 database setup step. Tests use a mocked Dropbox repository and do not require real Dropbox credentials.
 
-To scan the full approved grant archive and build a local report:
+## Example Requests
 
-```bash
-pnpm run index:dropbox
-```
-
-The indexer scans:
-
-- `/4 - Development/1 - Grants/2023 Grants`
-- `/4 - Development/1 - Grants/2024 Grants`
-- `/4 - Development/1 - Grants/2025 Grants`
-- `/4 - Development/1 - Grants/_2026 Grants`
-- `/4 - Development/1 - Grants/Grantwriting Resources`
-
-It writes a private searchable index and report to `work/index/`. These files are intentionally ignored by Git because they can contain real grant excerpts. The script is read-only against Dropbox: it lists and downloads files but never edits, moves, or deletes them.
-
-The report includes scanned/indexed/skipped/failed counts, file-level skip or parse reasons, counts by year/funder/document type, and sample search confirmations.
-
-## Private database search
-
-For faster and more complete search, load the local Dropbox archive index into a private Postgres database such as Supabase.
-
-1. Create a Supabase project.
-2. In Supabase, open Connect and copy the Transaction pooler connection string.
-3. Add the connection string to `.env` as `DATABASE_URL`.
-4. Create the database tables:
+Health:
 
 ```bash
-pnpm run db:setup
+curl http://localhost:3000/health
 ```
 
-5. If needed, refresh the local Dropbox index:
+Search with one grant question:
 
 ```bash
-pnpm run index:dropbox
+curl -X POST http://localhost:3000/search \
+  -H "Authorization: Bearer <GHF_ACTION_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d "{\"query\":\"Describe Grant Halliburton Foundation's youth mental health education programming.\"}"
 ```
 
-6. Import the private local index into the database:
+Search with a full pasted grant document:
 
 ```bash
-pnpm run db:import-index
+curl -X POST http://localhost:3000/search \
+  -H "Authorization: Bearer <GHF_ACTION_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d "{\"query\":\"Paste the full grant application text here, including all questions and instructions.\"}"
 ```
 
-7. Switch local search to the private database:
+Optional result limit:
 
-```bash
-SEARCH_BACKEND=database
+```json
+{
+  "query": "Paste grant question or full grant application text here",
+  "max_results": 5
+}
 ```
 
-8. On Vercel, add the same `DATABASE_URL` secret and set `SEARCH_BACKEND=database`, then redeploy.
+The server ignores request-supplied `folder`, `path`, `root`, `year`, `database`, `source`, and similar fields for search scope.
 
-Use `GET /debug/database` with the same bearer API key to confirm the database is connected and contains indexed documents/chunks.
+## Response Shape
 
-The database stores grant excerpts, so do not expose `DATABASE_URL`, do not put the generated index in GitHub, and do not use browser/client-side Supabase keys for this search API.
+`POST /search` returns compact source excerpts:
 
-## Scheduled database refresh
-
-The GitHub Actions workflow at `.github/workflows/refresh-grant-index.yml` refreshes the private database index every day and can also be run manually from the GitHub Actions tab.
-
-Add these repository secrets in GitHub under Settings > Secrets and variables > Actions:
-
-- `DROPBOX_CLIENT_ID`
-- `DROPBOX_CLIENT_SECRET`
-- `DROPBOX_REFRESH_TOKEN`
-- `DROPBOX_NAMESPACE_ID`
-- `DATABASE_URL`
-
-The workflow:
-
-1. Installs dependencies.
-2. Checks that required secrets are present.
-3. Builds the project.
-4. Ensures the database schema exists.
-5. Rebuilds the Dropbox index.
-6. Imports the index into the private database.
-
-It does not commit or upload the generated index. The import step also refuses to replace the database if the newly generated index has fewer than `MIN_INDEX_DOCUMENTS` documents or fewer than `MIN_INDEX_CHUNKS` chunks.
-
-## Free Deployment to Vercel
-
-This repo includes `vercel.json` so it can run on Vercel's free Hobby plan for personal/small projects.
-
-1. Sign in at https://vercel.com with GitHub.
-2. Choose Add New Project.
-3. Import this GitHub repository.
-4. Add these environment variables:
-   - `GHF_ACTION_API_KEY`
-   - `DROPBOX_CLIENT_ID`
-   - `DROPBOX_CLIENT_SECRET`
-   - `DROPBOX_REFRESH_TOKEN`
-   - `DROPBOX_NAMESPACE_ID=5698749680`
-   - `DROPBOX_ALLOWED_ROOT=/4 - Development/1 - Grants`
-   - `SEARCH_BACKEND=database` after the private database import is complete
-   - `DATABASE_URL` after the private database import is complete
-   - `NODE_ENV=production`
-5. Deploy.
-6. Confirm `/health` works on the Vercel URL.
-
-## Deployment to Render
-
-This repo includes `render.yaml`.
-
-1. Push the project to a private Git repository.
-2. Create a Render Web Service from that repository.
-3. Use the included build command:
-
-```bash
-corepack enable && pnpm install && pnpm run build
+```json
+{
+  "query": "Describe Grant Halliburton Foundation's youth mental health education programming.",
+  "query_characters": 78,
+  "source": "dropbox",
+  "searched_folders": [
+    "/4 - Development/1 - Grants/_2026 Grants",
+    "/4 - Development/1 - Grants/2025 Grants",
+    "/4 - Development/1 - Grants/2024 Grants",
+    "/4 - Development/1 - Grants/Grantwriting Resources"
+  ],
+  "results": [
+    {
+      "rank": 1,
+      "title": "Example Grant Application",
+      "source_file": "Example Grant Application.docx",
+      "path": "/4 - Development/1 - Grants/2025 Grants/Example/Example Grant Application.docx",
+      "source_path": "/4 - Development/1 - Grants/2025 Grants/Example/Example Grant Application.docx",
+      "source_folder": "2025 Grants",
+      "source_category": "approved_grant_folder",
+      "year": "2025",
+      "excerpt": "Short relevant Dropbox excerpt...",
+      "confidence": "medium"
+    }
+  ]
+}
 ```
 
-4. Use the start command:
+Ranking is relevance-first. When relevance is similar, `_2026 Grants` is boosted first, then `2025 Grants`, then `2024 Grants`, then `Grantwriting Resources`.
 
-```bash
-pnpm start
-```
+## Custom GPT Action Setup
 
-5. Add all required environment variables in Render.
-6. Confirm `GET /health` returns the expected JSON.
-
-## GPT Builder Action setup
-
-1. Deploy the API.
+1. Deploy this API.
 2. Open `openapi/ghf-grant-knowledge-api.yaml`.
-3. Replace the placeholder server URL with the deployed Vercel or Render URL.
+3. Replace the placeholder server URL with the deployed API URL.
 4. Paste the schema into GPT Builder Actions.
-5. Configure authentication as bearer token auth using the same value as `GHF_ACTION_API_KEY`.
-6. Test actions from GPT Builder with a safe prompt such as: "Find previous language about demographics."
+5. Configure Action authentication as bearer token auth.
+6. Use the same value as `GHF_ACTION_API_KEY`.
 
-The Custom GPT should call this API to retrieve excerpts, then draft the final answer itself while honoring any character limit.
+The Action should call only `POST /search` for source retrieval. Kevin should not see Dropbox OAuth, Dropbox folder choices, API keys, database settings, paths, roots, namespaces, or troubleshooting prompts.
 
-## Security notes
+## Deployment Notes
 
-- `/health` is public; all other endpoints require `Authorization: Bearer <GHF_ACTION_API_KEY>`.
-- Only paths inside the configured `DROPBOX_ALLOWED_ROOT` are accepted.
-- Blocked terms are enforced in code, case-insensitively: W-9, W9, Audit, 990, Insurance, Board, Donor, Bank, HR, Personnel, Payroll, Tax, Check, ACH, Account, Routing, Staff Contact, Personal, Confidential.
-- Blocked paths return `blocked_path` and are not downloaded.
-- Results are capped at `MAX_RESULTS_LIMIT`.
-- Excerpts are capped at `MAX_EXCERPT_CHARS`.
+For Render, `render.yaml` uses the v1 env var names.
+
+For Vercel, add these environment variables manually:
+
+- `NODE_ENV=production`
+- `GHF_ACTION_API_KEY`
+- `DROPBOX_APP_KEY`
+- `DROPBOX_APP_SECRET`
+- `DROPBOX_REFRESH_TOKEN`
+- `DROPBOX_PATH_ROOT_NAMESPACE_ID=5698749680`
+- `DROPBOX_ALLOWED_ROOTS=/4 - Development/1 - Grants/_2026 Grants|/4 - Development/1 - Grants/2025 Grants|/4 - Development/1 - Grants/2024 Grants|/4 - Development/1 - Grants/Grantwriting Resources`
+- `MAX_RESULTS_DEFAULT=5`
+- `MAX_RESULTS_LIMIT=10`
+- `MAX_EXCERPT_CHARS=2000`
+- `REQUEST_TIMEOUT_MS=20000`
+
+Do not add Supabase, Postgres, vector database, private database, or background index refresh settings for v1.
+
+## Security Notes
+
+- Dropbox is read-only from this API.
+- The API never uploads, edits, moves, or deletes Dropbox files.
+- The folder allowlist cannot be changed by request body fields.
+- Results outside the approved folders are excluded.
+- Blocked path terms are enforced case-insensitively.
+- Full documents are not returned, only excerpts.
 - Logs omit excerpts, file contents, secrets, API keys, and restricted paths.
-- Rate limiting is included by API key or IP.
 - Errors are intentionally generic to avoid exposing internals.
 
 ## Troubleshooting
 
-- If Dropbox searches return `{}` or no matches with no obvious error, check that `DROPBOX_NAMESPACE_ID` is set for the shared/team namespace.
-- If Dropbox returns `files/search_v2 invalid_argument`, remove any trailing slash from `DROPBOX_ALLOWED_ROOT`.
-- If authentication works but no files appear, run `GET /debug/dropbox` locally.
-- If database search returns no results, run `GET /debug/database` and confirm the document/chunk counts are nonzero.
-- If secrets were exposed in screenshots or logs, rotate the Dropbox App secret and refresh token before deployment.
-
-## Known limitations
-
-- Dropbox search may miss content in some file types.
-- Legacy `.doc` files are scanned and reported, but should be converted to `.docx` or PDF before they can be indexed safely.
-- PDF extraction quality may vary.
-- Image-only PDFs may need OCR before useful text can be indexed.
-- This API returns excerpts, not final grant answers.
-- Human review is still required for numbers, budgets, deadlines, and funder submission.
-- The API intentionally blocks sensitive folder patterns.
-- Version 1 uses keyword search; vector/semantic search can be added later.
-
-## Future improvements
-
-- Vector search cache
-- Nightly indexing job
-- Supabase or Postgres storage
-- Admin dashboard for approved files
-- Manual answer-bank curation
-- Funder history summaries
-- Report due-date extraction
-- Source ranking by funded/successful grants
-- User feedback loop for good answer examples
+- If shared/team Dropbox folders are not visible, check `DROPBOX_PATH_ROOT_NAMESPACE_ID`.
+- If Dropbox search reports invalid path arguments, remove trailing slashes from `DROPBOX_ALLOWED_ROOTS`.
+- If authentication fails, confirm the Action bearer token matches `GHF_ACTION_API_KEY`.
+- If `/search` returns no results, call protected `GET /debug/dropbox` with the same bearer token and confirm the approved folders are reachable.

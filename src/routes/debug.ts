@@ -20,21 +20,14 @@ export function createDebugRouter(config: AppConfig, sourceRepository: SourceRep
       diagnostic: "database"
     };
 
-    if (sourceRepository.diagnoseDatabase) {
-      const diagnostic = await sourceRepository.diagnoseDatabase();
-      res.locals.resultCount = Number(diagnostic.lyda_hill_search.result_count ?? 0);
-      res.json(diagnostic);
-      return;
-    }
-
     res.json({
       configured: {
-        backend: config.searchBackend,
-        database_url: Boolean(config.databaseUrl)
+        backend: "dropbox",
+        database_url: false
       },
       connection_check: {
         ok: false,
-        skipped: "Database diagnostics are unavailable because the active source is Dropbox."
+        skipped: "Version 1 search is Dropbox-only; no private database is used."
       },
       index_counts: {
         documents: 0,
@@ -45,10 +38,10 @@ export function createDebugRouter(config: AppConfig, sourceRepository: SourceRep
         query: "Lyda Hill",
         result_count: 0,
         sample_paths: [],
-        skipped: "Database diagnostics are unavailable because the active source is Dropbox."
+        skipped: "Version 1 search is Dropbox-only; no private database is used."
       },
       notes: [
-        "Set SEARCH_BACKEND=database and DATABASE_URL to use the private database index."
+        "Dropbox is the live master source for v1."
       ]
     });
   }));
@@ -81,7 +74,8 @@ export function createDebugRouter(config: AppConfig, sourceRepository: SourceRep
           all: hasConfiguredDropbox(config)
         },
         namespace_id: Boolean(config.dropboxNamespaceId),
-        allowed_root: config.dropboxAllowedRoot
+        allowed_root: config.dropboxAllowedRoot,
+        allowed_roots: config.dropboxAllowedRoots
       },
       account_check: {
         ok: false,
@@ -89,7 +83,7 @@ export function createDebugRouter(config: AppConfig, sourceRepository: SourceRep
       },
       allowed_root_check: {
         ok: false,
-        path: config.dropboxAllowedRoot,
+        paths: config.dropboxAllowedRoots,
         skipped: "Dropbox root diagnostics are unavailable for this repository."
       },
       lyda_hill_search: {

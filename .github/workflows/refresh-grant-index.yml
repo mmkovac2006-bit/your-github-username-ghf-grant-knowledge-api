@@ -21,7 +21,7 @@ jobs:
       DROPBOX_CLIENT_SECRET: ${{ secrets.DROPBOX_CLIENT_SECRET }}
       DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
       DROPBOX_NAMESPACE_ID: ${{ secrets.DROPBOX_NAMESPACE_ID }}
-      DROPBOX_ALLOWED_ROOT: /4 - Development/1 - Grants
+      DROPBOX_ALLOWED_ROOTS: "/4 - Development/1 - Grants/_2026 Grants|/4 - Development/1 - Grants/2025 Grants|/4 - Development/1 - Grants/2024 Grants|/4 - Development/1 - Grants/Grantwriting Resources"
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DATABASE_MAX_CONNECTIONS: 3
       REQUEST_TIMEOUT_MS: 60000

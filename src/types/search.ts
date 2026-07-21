@@ -1,10 +1,15 @@
 export type Confidence = "high" | "medium" | "low";
 
 export type SearchResult = {
+  rank?: number;
+  title?: string;
   source_file: string;
   funder?: string | null;
   year?: string | null;
   path: string;
+  source_path?: string;
+  source_folder?: string;
+  source_category?: string;
   excerpt: string;
   confidence: Confidence;
   document_type?: string | null;
@@ -45,6 +50,7 @@ export type DropboxDiagnostic = {
     };
     namespace_id: boolean;
     allowed_root: string;
+    allowed_roots: string[];
   };
   account_check: Record<string, unknown>;
   allowed_root_check: Record<string, unknown>;

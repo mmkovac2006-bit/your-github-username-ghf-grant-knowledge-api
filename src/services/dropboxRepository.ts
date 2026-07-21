@@ -3,7 +3,7 @@ import { AppError, upstreamError } from "../utils/errors";
 import {
   hasConfiguredDropbox,
   isBlockedPath,
-  isInsideAllowedRoot,
+  isInsideAllowedRoots,
   normalizeDropboxPath
 } from "../utils/security";
 import { candidatePriority, isSupportedFile, tokenize, uniqueTerms } from "../utils/search";
@@ -69,18 +69,20 @@ export class DropboxRepository implements SourceRepository {
     const candidateMap = new Map<string, FileCandidate>();
     let restrictedSkipped = 0;
 
-    for (const term of queryTerms.length ? queryTerms : ["grant"]) {
-      const response = await this.rpc<DropboxSearchResponse>("files/search_v2", {
-        query: term,
-        options: {
-          path: this.config.dropboxAllowedRoot,
-          max_results: Math.min(input.maxCandidates, 25),
-          filename_only: false,
-          file_status: "active"
-        }
-      });
+    for (const root of this.config.dropboxAllowedRoots) {
+      for (const term of queryTerms.length ? queryTerms : ["grant"]) {
+        const response = await this.rpc<DropboxSearchResponse>("files/search_v2", {
+          query: term,
+          options: {
+            path: root,
+            max_results: Math.min(input.maxCandidates, 25),
+            filename_only: false,
+            file_status: "active"
+          }
+        });
 
-      restrictedSkipped += this.addMetadataCandidates(response.matches?.map((match) => match.metadata?.metadata) ?? [], candidateMap);
+        restrictedSkipped += this.addMetadataCandidates(response.matches?.map((match) => match.metadata?.metadata) ?? [], candidateMap);
+      }
     }
 
     if (candidateMap.size === 0) {
@@ -153,7 +155,8 @@ export class DropboxRepository implements SourceRepository {
           all: hasConfiguredDropbox(this.config)
         },
         namespace_id: Boolean(this.config.dropboxNamespaceId),
-        allowed_root: this.config.dropboxAllowedRoot
+        allowed_root: this.config.dropboxAllowedRoot,
+        allowed_roots: this.config.dropboxAllowedRoots
       },
       account_check: {
         ok: false,
@@ -161,7 +164,7 @@ export class DropboxRepository implements SourceRepository {
       },
       allowed_root_check: {
         ok: false,
-        path: this.config.dropboxAllowedRoot,
+        paths: this.config.dropboxAllowedRoots,
         skipped: "Dropbox credentials are not fully configured."
       },
       lyda_hill_search: {
@@ -192,22 +195,35 @@ export class DropboxRepository implements SourceRepository {
     }
 
     try {
-      const metadata = await this.rpc<DropboxFileMetadata>("files/get_metadata", {
-        path: this.config.dropboxAllowedRoot,
-        include_deleted: false
-      });
+      const rootChecks: Array<Record<string, unknown>> = [];
+
+      for (const root of this.config.dropboxAllowedRoots) {
+        try {
+          const metadata = await this.rpc<DropboxFileMetadata>("files/get_metadata", {
+            path: root,
+            include_deleted: false
+          });
+
+          rootChecks.push({
+            ok: true,
+            path: root,
+            tag: metadata[".tag"] ?? null,
+            name: metadata.name ?? null
+          });
+        } catch (error) {
+          rootChecks.push({
+            ...this.safeDiagnosticError(error),
+            path: root
+          });
+        }
+      }
 
       diagnostic.allowed_root_check = {
-        ok: true,
-        path: this.config.dropboxAllowedRoot,
-        tag: metadata[".tag"] ?? null,
-        name: metadata.name ?? null
+        ok: rootChecks.every((check) => check.ok === true),
+        roots: rootChecks
       };
     } catch (error) {
-      diagnostic.allowed_root_check = {
-        ...this.safeDiagnosticError(error),
-        path: this.config.dropboxAllowedRoot
-      };
+      diagnostic.allowed_root_check = this.safeDiagnosticError(error);
     }
 
     try {
@@ -233,7 +249,7 @@ export class DropboxRepository implements SourceRepository {
     }
 
     if (!this.config.dropboxNamespaceId) {
-      diagnostic.notes.push("DROPBOX_NAMESPACE_ID is not set; shared/team folders may not be visible.");
+      diagnostic.notes.push("DROPBOX_PATH_ROOT_NAMESPACE_ID is not set; shared/team folders may not be visible.");
     }
 
     return diagnostic;
@@ -245,29 +261,35 @@ export class DropboxRepository implements SourceRepository {
     let scannedEntries = 0;
     const maxScannedEntries = Math.max(500, Math.min(maxCandidates * 200, 5000));
 
-    let response = await this.rpc<DropboxListFolderResponse>("files/list_folder", {
-      path: this.config.dropboxAllowedRoot,
-      recursive: true,
-      include_deleted: false,
-      include_non_downloadable_files: false,
-      limit: 1000
-    });
+    for (const root of this.config.dropboxAllowedRoots) {
+      let response = await this.rpc<DropboxListFolderResponse>("files/list_folder", {
+        path: root,
+        recursive: true,
+        include_deleted: false,
+        include_non_downloadable_files: false,
+        limit: 1000
+      });
 
-    while (true) {
-      const entries = response.entries ?? [];
-      scannedEntries += entries.length;
-      restrictedSkipped += this.addMetadataCandidates(
-        entries.filter((entry) => this.matchesLocalTerms(entry, terms)),
-        candidateMap
-      );
+      while (true) {
+        const entries = response.entries ?? [];
+        scannedEntries += entries.length;
+        restrictedSkipped += this.addMetadataCandidates(
+          entries.filter((entry) => this.matchesLocalTerms(entry, terms)),
+          candidateMap
+        );
 
-      if (!response.has_more || !response.cursor || scannedEntries >= maxScannedEntries) {
-        break;
+        if (!response.has_more || !response.cursor || scannedEntries >= maxScannedEntries) {
+          break;
+        }
+
+        response = await this.rpc<DropboxListFolderResponse>("files/list_folder/continue", {
+          cursor: response.cursor
+        });
       }
 
-      response = await this.rpc<DropboxListFolderResponse>("files/list_folder/continue", {
-        cursor: response.cursor
-      });
+      if (scannedEntries >= maxScannedEntries) {
+        break;
+      }
     }
 
     return {
@@ -290,7 +312,7 @@ export class DropboxRepository implements SourceRepository {
       }
 
       const normalizedPath = normalizeDropboxPath(metadata.path_display);
-      if (!isInsideAllowedRoot(normalizedPath, this.config.dropboxAllowedRoot) || isBlockedPath(normalizedPath)) {
+      if (!isInsideAllowedRoots(normalizedPath, this.config.dropboxAllowedRoots) || isBlockedPath(normalizedPath)) {
         restrictedSkipped += 1;
         continue;
       }

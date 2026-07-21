@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { extractTextFromBuffer, getSourceFileName } from "../src/services/textExtraction";
-import { createConfig, type AppConfig } from "../src/utils/config";
+import { createConfig, DEFAULT_DROPBOX_ALLOWED_ROOTS, type AppConfig } from "../src/utils/config";
 import {
   inferDocumentMetadata,
   isExtractableExtension,
@@ -111,16 +111,10 @@ type IndexReport = {
   limitations: string[];
 };
 
-const DEFAULT_ROOTS = [
-  "/4 - Development/1 - Grants/2023 Grants",
-  "/4 - Development/1 - Grants/2024 Grants",
-  "/4 - Development/1 - Grants/2025 Grants",
-  "/4 - Development/1 - Grants/_2026 Grants",
-  "/4 - Development/1 - Grants/Grantwriting Resources"
-];
+const DEFAULT_ROOTS = DEFAULT_DROPBOX_ALLOWED_ROOTS;
 
 const SAMPLE_SEARCHES = [
-  "Find prior Lyda Hill grant materials from 2023-2026.",
+  "Find prior Lyda Hill grant materials from 2024-2026.",
   "Find prior education programming language.",
   "Find prior evaluation language.",
   "Find submitted proposal language about Peer Helpers.",
@@ -775,15 +769,17 @@ function countBy<T>(items: T[], selector: (item: T) => string): Record<string, n
 }
 
 function configuredRoots(): string[] {
-  const raw = process.env.INDEX_DROPBOX_ROOTS;
+  const raw = process.env.INDEX_DROPBOX_ROOTS ?? process.env.DROPBOX_ALLOWED_ROOTS;
   if (!raw) {
     return DEFAULT_ROOTS;
   }
 
-  return raw
+  const configured = raw
     .split("|")
     .map((root) => normalizeDropboxPath(root))
     .filter(Boolean);
+
+  return configured.length > 0 ? [...new Set(configured)] : DEFAULT_ROOTS;
 }
 
 function assertDropboxConfigured(config: AppConfig): void {

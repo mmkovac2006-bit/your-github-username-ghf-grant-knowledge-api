@@ -44,6 +44,12 @@ export function normalizeDropboxPath(path: string): string {
   return normalized;
 }
 
+export function hasUnsafeDropboxPathSegment(path: string): boolean {
+  return normalizeDropboxPath(path)
+    .split("/")
+    .some((segment) => segment === "." || segment === "..");
+}
+
 export function normalizeAllowedRoot(path: string): string {
   const normalized = normalizeDropboxPath(path);
   return normalized.endsWith("/") ? normalized : `${normalized}/`;
@@ -55,13 +61,21 @@ export function isBlockedPath(path: string): boolean {
 }
 
 export function isInsideAllowedRoot(path: string, allowedRoot: string): boolean {
+  if (hasUnsafeDropboxPathSegment(path)) {
+    return false;
+  }
+
   const normalizedPath = normalizeDropboxPath(path).toLowerCase();
   const normalizedRoot = normalizeAllowedRoot(allowedRoot).toLowerCase();
   return normalizedPath === normalizedRoot.slice(0, -1) || normalizedPath.startsWith(normalizedRoot);
 }
 
-export function isSafeDropboxPath(path: string, allowedRoot: string): boolean {
-  return isInsideAllowedRoot(path, allowedRoot) && !isBlockedPath(path);
+export function isInsideAllowedRoots(path: string, allowedRoots: string[]): boolean {
+  return allowedRoots.some((allowedRoot) => isInsideAllowedRoot(path, allowedRoot));
+}
+
+export function isSafeDropboxPath(path: string, allowedRoots: string[]): boolean {
+  return isInsideAllowedRoots(path, allowedRoots) && !isBlockedPath(path);
 }
 
 export function safeCompareSecret(actual: string, expected: string): boolean {
