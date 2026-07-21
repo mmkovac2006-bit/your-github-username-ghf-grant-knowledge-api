@@ -287,6 +287,58 @@ describe("GHF Grant Knowledge API", () => {
     expect(namespaceHeaders.every((headers) => headers["Dropbox-API-Path-Root"]?.includes("5698749680"))).toBe(true);
   });
 
+  it("bounds verbose Dropbox searches and shares one token refresh", async () => {
+    const fetchMock = vi.fn(async (url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => {
+      const endpoint = String(url);
+
+      if (endpoint.endsWith("/oauth2/token")) {
+        return new Response(JSON.stringify({ access_token: "dropbox-access-token", expires_in: 14_400 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      if (endpoint.endsWith("/files/search_v2")) {
+        return new Response(JSON.stringify({ matches: [{
+          metadata: {
+            metadata: {
+              ".tag": "file",
+              name: "Lyda Hill Grant Backup.pdf",
+              path_display: `${allowedRoot}/2025 Grants/Lyda Hill/Lyda Hill Grant Backup.pdf`
+            }
+          }
+        }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const repository = new DropboxRepository(makeConfig({
+      DROPBOX_PATH_ROOT_NAMESPACE_ID: "5698749680"
+    }));
+
+    await repository.searchFiles({
+      terms: ["Find", "prior", "Lyda", "Hill", "grant", "materials", "2024", "2025", "2026"],
+      maxCandidates: 10
+    });
+
+    const searchCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/files/search_v2"));
+    const tokenCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/oauth2/token"));
+    const queries = searchCalls.map(([, init]) => JSON.parse(String(init?.body)).query);
+
+    expect(searchCalls).toHaveLength(allowedRoots.length * 2);
+    expect(queries).toContain("Lyda Hill");
+    expect(tokenCalls).toHaveLength(1);
+  });
+
   it("keeps v1 search Dropbox-only even if legacy database env vars are present", async () => {
     const config = makeConfig({
       SEARCH_BACKEND: "database",
@@ -546,3 +598,4 @@ describe("GHF Grant Knowledge API", () => {
     expect(isBlockedPath(`${allowedRoot}/2025 Grants/Funder/Audited Financials 2023.pdf`)).toBe(true);
   });
 });
+
