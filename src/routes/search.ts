@@ -60,7 +60,9 @@ export function createSearchRouter(searchService: GrantSearchService) {
     const result = await searchService.search(body);
     res.locals.resultCount = result.response.results.length;
     res.locals.restrictedSkipped = result.meta.restrictedSkipped > 0;
-    res.json(result.response);
+    if (!res.headersSent) {
+      res.json(result.response);
+    }
   }));
 
   router.post("/search_grant_language", asyncHandler(async (req, res) => {
@@ -74,7 +76,9 @@ export function createSearchRouter(searchService: GrantSearchService) {
     const result = await searchService.searchGrantLanguage(body);
     res.locals.resultCount = result.response.results.length;
     res.locals.restrictedSkipped = result.meta.restrictedSkipped > 0;
-    res.json(result.response);
+    if (!res.headersSent) {
+      res.json(result.response);
+    }
   }));
 
   router.post("/search_by_funder", asyncHandler(async (req, res) => {
@@ -86,7 +90,9 @@ export function createSearchRouter(searchService: GrantSearchService) {
     const result = await searchService.searchByFunder(body);
     res.locals.resultCount = result.response.results.length;
     res.locals.restrictedSkipped = result.meta.restrictedSkipped > 0;
-    res.json(result.response);
+    if (!res.headersSent) {
+      res.json(result.response);
+    }
   }));
 
   router.post("/search_answer_category", asyncHandler(async (req, res) => {
@@ -98,7 +104,9 @@ export function createSearchRouter(searchService: GrantSearchService) {
     const result = await searchService.searchAnswerCategory(body);
     res.locals.resultCount = result.response.examples.length;
     res.locals.restrictedSkipped = result.meta.restrictedSkipped > 0;
-    res.json(result.response);
+    if (!res.headersSent) {
+      res.json(result.response);
+    }
   }));
 
   router.post("/fetch_source_excerpt", asyncHandler(async (req, res) => {
@@ -110,7 +118,9 @@ export function createSearchRouter(searchService: GrantSearchService) {
     const result = await searchService.fetchSourceExcerpt(body);
     res.locals.resultCount = 1;
     res.locals.restrictedSkipped = result.meta.restrictedSkipped > 0;
-    res.json(result.response);
+    if (!res.headersSent) {
+      res.json(result.response);
+    }
   }));
 
   return router;
