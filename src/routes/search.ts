@@ -7,6 +7,12 @@ import { sanitizeLogValue } from "../utils/security";
 const optionalText = z.string().trim().min(1).max(500).optional();
 const maxResults = z.number().int().positive().optional();
 
+const searchSchema = z.object({
+  query: z.string().trim().min(1).max(100_000),
+  character_limit: z.number().int().positive().max(50_000).optional(),
+  max_results: maxResults
+});
+
 const searchGrantLanguageSchema = z.object({
   question: z.string().trim().min(1).max(4000),
   category: optionalText,
@@ -44,6 +50,18 @@ function asyncHandler(handler: AsyncHandler) {
 
 export function createSearchRouter(searchService: GrantSearchService) {
   const router = Router();
+
+  router.post("/search", asyncHandler(async (req, res) => {
+    const body = searchSchema.parse(req.body);
+    res.locals.logContext = {
+      query: sanitizeLogValue(body.query)
+    };
+
+    const result = await searchService.search(body);
+    res.locals.resultCount = result.response.results.length;
+    res.locals.restrictedSkipped = result.meta.restrictedSkipped > 0;
+    res.json(result.response);
+  }));
 
   router.post("/search_grant_language", asyncHandler(async (req, res) => {
     const body = searchGrantLanguageSchema.parse(req.body);
@@ -97,3 +115,4 @@ export function createSearchRouter(searchService: GrantSearchService) {
 
   return router;
 }
+
