@@ -2,7 +2,11 @@ openapi: 3.1.0
 info:
   title: GHF Grant Knowledge API
   version: 1.0.0
-  description: Secure read-only middleware API for retrieving short reusable grant-language excerpts from approved Dropbox folders.
+  description: >
+    Dropbox-only v1 middleware for Custom GPT Actions. The GPT sends one grant
+    question or a pasted grant application as query text. The server searches
+    only the approved Grant Halliburton Foundation Dropbox folders, then returns
+    compact source excerpts for the GPT to draft paste-ready grant answers.
 servers:
   - url: https://your-github-username-ghf-grant-know.vercel.app
     description: Vercel production deployment.
@@ -32,238 +36,77 @@ paths:
                   version:
                     type: string
                     const: 1.0.0
-  /search_grant_language:
+  /search:
     post:
-      operationId: searchGrantLanguage
-      summary: Search prior grant language for a grant portal question.
+      operationId: searchGrantSources
+      summary: Find relevant Dropbox source excerpts for a grant question or pasted grant application.
+      description: >
+        Clients provide only query text. The server automatically searches the
+        approved Dropbox folders; clients do not choose folders, paths, years,
+        Dropbox roots, namespaces, Supabase, databases, vector stores, or any
+        other knowledge source. Dropbox authentication is handled only by the
+        middleware through server environment variables. The Custom GPT Action
+        authenticates to this API with the configured bearer API key.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [question]
+              additionalProperties: true
+              required: [query]
               properties:
-                question:
+                query:
                   type: string
-                  description: Grant portal question to support with source excerpts.
-                category:
-                  type: string
-                  description: Optional common answer category.
+                  minLength: 1
+                  maxLength: 100000
+                  description: One grant question, multiple grant questions, or a pasted grant application/document.
                 character_limit:
                   type: integer
                   minimum: 1
-                  description: Character limit the GPT should honor when drafting the final answer.
-                funder:
-                  type: string
-                  description: Optional funder name.
-                preferred_years:
-                  type: string
-                  description: Optional year range, such as 2023-2026.
-                  default: 2023-2026
+                  maximum: 50000
+                  description: Optional final-answer character limit for the GPT to honor while drafting.
                 max_results:
                   type: integer
                   minimum: 1
                   maximum: 10
                   default: 5
+                  description: Optional number of source excerpts to return.
       responses:
         "200":
-          description: Matching reusable source excerpts.
+          description: Relevant source excerpts from approved Dropbox folders.
           content:
             application/json:
               schema:
                 type: object
-                required: [query, results]
+                required: [query, query_characters, source, searched_folders, results]
                 properties:
                   query:
-                    type: object
-                    required: [question, category, character_limit, funder, preferred_years]
-                    properties:
-                      question:
-                        type: string
-                      category:
-                        type: [string, "null"]
-                      character_limit:
-                        type: [integer, "null"]
-                      funder:
-                        type: [string, "null"]
-                      preferred_years:
-                        type: string
+                    type: string
+                    description: Compact echo of the submitted query.
+                  query_characters:
+                    type: integer
+                  source:
+                    type: string
+                    const: dropbox
+                  searched_folders:
+                    type: array
+                    items:
+                      type: string
+                    description: Server-enforced approved Dropbox folders.
                   results:
                     type: array
                     maxItems: 10
                     items:
                       $ref: "#/components/schemas/SearchResult"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-  /search_by_funder:
-    post:
-      operationId: searchByFunder
-      summary: Find prior grant material for a specific funder.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [funder]
-              properties:
-                funder:
-                  type: string
-                years:
-                  type: string
-                  default: 2023-2026
-                max_results:
-                  type: integer
-                  minimum: 1
-                  maximum: 10
-                  default: 5
-      responses:
-        "200":
-          description: Matching funder-specific source excerpts.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [funder, results]
-                properties:
-                  funder:
-                    type: string
-                  results:
-                    type: array
-                    maxItems: 10
-                    items:
-                      allOf:
-                        - $ref: "#/components/schemas/SearchResult"
-                        - type: object
-                          properties:
-                            grant_type:
-                              type: [string, "null"]
-                            amount_requested:
-                              type: [number, "null"]
-                            amount_awarded:
-                              type: [number, "null"]
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-  /search_answer_category:
-    post:
-      operationId: searchAnswerCategory
-      summary: Search reusable answer-bank language by category.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [category]
-              properties:
-                category:
-                  type: string
-                  enum:
-                    - organization overview
-                    - mission and history
-                    - population served
-                    - demographics
-                    - geographic area served
-                    - need statement
-                    - education programming
-                    - Peer Helpers
-                    - Peer Helpers PLUS
-                    - Thrive
-                    - HOPE Framework
-                    - Here For Texas
-                    - Navigation Line
-                    - outcomes and impact
-                    - evaluation
-                    - financial health
-                    - funding diversification
-                    - sustainability
-                    - partnerships
-                    - equity and access
-                    - organizational capacity
-                    - leadership
-                character_limit:
-                  type: integer
-                  minimum: 1
-                max_results:
-                  type: integer
-                  minimum: 1
-                  maximum: 10
-                  default: 5
-      responses:
-        "200":
-          description: Category examples from reusable source language.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [category, examples]
-                properties:
-                  category:
-                    type: string
-                  examples:
-                    type: array
-                    maxItems: 10
-                    items:
-                      allOf:
-                        - $ref: "#/components/schemas/SearchResult"
-                        - type: object
-                          properties:
-                            needs_verification:
-                              type: string
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-  /fetch_source_excerpt:
-    post:
-      operationId: fetchSourceExcerpt
-      summary: Fetch a longer topic-focused excerpt from one approved source file.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [path, topic]
-              properties:
-                path:
-                  type: string
-                  description: Dropbox path returned by a previous search result.
-                topic:
-                  type: string
-                max_characters:
-                  type: integer
-                  minimum: 1
-                  maximum: 2000
-                  default: 2000
-      responses:
-        "200":
-          description: Longer source excerpt only.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [source_file, path, topic, excerpt, character_count, notes]
-                properties:
-                  source_file:
-                    type: string
-                  path:
-                    type: string
-                  topic:
-                    type: string
-                  excerpt:
-                    type: string
-                  character_count:
-                    type: integer
-                  notes:
-                    type: string
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          description: Restricted path blocked.
+        "400":
+          description: Invalid request.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 components:
   securitySchemes:
     bearerAuth:
@@ -280,8 +123,15 @@ components:
   schemas:
     SearchResult:
       type: object
-      required: [source_file, path, excerpt, confidence]
+      required: [rank, title, source_file, path, source_path, source_folder, source_category, excerpt, confidence]
       properties:
+        rank:
+          type: integer
+          minimum: 1
+          description: Ranking order, with the best result first.
+        title:
+          type: string
+          description: Source title without the file extension.
         source_file:
           type: string
         funder:
@@ -290,6 +140,20 @@ components:
           type: [string, "null"]
         path:
           type: string
+          description: Safe Dropbox source path inside an approved folder.
+        source_path:
+          type: string
+          description: Same safe Dropbox source path, included for GPT clarity.
+        source_folder:
+          type: string
+          enum:
+            - _2026 Grants
+            - 2025 Grants
+            - 2024 Grants
+            - Grantwriting Resources
+        source_category:
+          type: string
+          enum: [approved_grant_folder, grantwriting_resources]
         excerpt:
           type: string
           maxLength: 2000
@@ -310,3 +174,4 @@ components:
           type: string
         message:
           type: string
+
