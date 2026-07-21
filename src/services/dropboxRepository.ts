@@ -56,8 +56,27 @@ type AccessTokenState = {
   expiresAt: number;
 };
 
+const MAX_DROPBOX_QUERY_TERMS = 2;
+const GENERIC_DROPBOX_QUERY_TERMS = new Set([
+  "document",
+  "documents",
+  "file",
+  "files",
+  "find",
+  "grant",
+  "grants",
+  "information",
+  "language",
+  "material",
+  "materials",
+  "prior",
+  "source",
+  "sources"
+]);
+
 export class DropboxRepository implements SourceRepository {
   private accessToken: AccessTokenState | null = null;
+  private accessTokenRequest: Promise<string> | null = null;
 
   constructor(private readonly config: AppConfig) {}
 
@@ -69,9 +88,12 @@ export class DropboxRepository implements SourceRepository {
     const candidateMap = new Map<string, FileCandidate>();
     let restrictedSkipped = 0;
 
-    for (const root of this.config.dropboxAllowedRoots) {
-      for (const term of queryTerms.length ? queryTerms : ["grant"]) {
-        const response = await this.rpc<DropboxSearchResponse>("files/search_v2", {
+    const searches = this.config.dropboxAllowedRoots.flatMap((root) =>
+      (queryTerms.length ? queryTerms : ["grant"]).map((term) => ({ root, term }))
+    );
+    const searchResults = await Promise.allSettled(
+      searches.map(({ root, term }) =>
+        this.rpc<DropboxSearchResponse>("files/search_v2", {
           query: term,
           options: {
             path: root,
@@ -79,10 +101,19 @@ export class DropboxRepository implements SourceRepository {
             filename_only: false,
             file_status: "active"
           }
-        });
+        })
+      )
+    );
 
-        restrictedSkipped += this.addMetadataCandidates(response.matches?.map((match) => match.metadata?.metadata) ?? [], candidateMap);
+    for (const result of searchResults) {
+      if (result.status !== "fulfilled") {
+        continue;
       }
+
+      restrictedSkipped += this.addMetadataCandidates(
+        result.value.matches?.map((match) => match.metadata?.metadata) ?? [],
+        candidateMap
+      );
     }
 
     if (candidateMap.size === 0) {
@@ -350,8 +381,15 @@ export class DropboxRepository implements SourceRepository {
   }
 
   private dropboxQueryTerms(terms: string[]): string[] {
-    const nonYearTerms = terms.filter((term) => !/^20\d{2}$/.test(term.trim()));
-    return nonYearTerms.length > 0 ? nonYearTerms : terms;
+    const nonYearTerms = uniqueTerms(terms)
+      .filter((term) => !/^20\d{2}$/.test(term.trim()))
+      .filter((term) => !GENERIC_DROPBOX_QUERY_TERMS.has(term.trim().toLowerCase()));
+    const multiWordTerms = nonYearTerms.filter((term) => /\s/.test(term.trim()));
+    const singleTerms = nonYearTerms.filter((term) => !/\s/.test(term.trim()));
+    const adjacentPairs = singleTerms.slice(0, -1).map((term, index) => `${term} ${singleTerms[index + 1]}`);
+    const selected = uniqueTerms([...multiWordTerms, ...adjacentPairs, ...singleTerms]);
+
+    return (selected.length > 0 ? selected : ["grant"]).slice(0, MAX_DROPBOX_QUERY_TERMS);
   }
 
   private assertConfigured() {
@@ -397,6 +435,19 @@ export class DropboxRepository implements SourceRepository {
     if (this.accessToken && this.accessToken.expiresAt > now + 60_000) {
       return this.accessToken.token;
     }
+
+    if (!this.accessTokenRequest) {
+      this.accessTokenRequest = this.refreshAccessToken(now);
+    }
+
+    try {
+      return await this.accessTokenRequest;
+    } finally {
+      this.accessTokenRequest = null;
+    }
+  }
+
+  private async refreshAccessToken(now: number): Promise<string> {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
@@ -530,3 +581,4 @@ export class DropboxRepository implements SourceRepository {
     };
   }
 }
+
