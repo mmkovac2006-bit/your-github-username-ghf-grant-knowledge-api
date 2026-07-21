@@ -41,12 +41,10 @@ paths:
       operationId: searchGrantSources
       summary: Find relevant Dropbox source excerpts for a grant question or pasted grant application.
       description: >
-        Clients provide only query text. The server automatically searches the
-        approved Dropbox folders; clients do not choose folders, paths, years,
-        Dropbox roots, namespaces, Supabase, databases, vector stores, or any
-        other knowledge source. Dropbox authentication is handled only by the
-        middleware through server environment variables. The Custom GPT Action
-        authenticates to this API with the configured bearer API key.
+        Search approved GHF Dropbox folders for source excerpts relevant to a
+        grant question or pasted application. The client sends query text and
+        an API key. Folder scope, Dropbox credentials, and source selection are
+        enforced by the server.
       requestBody:
         required: true
         content:
