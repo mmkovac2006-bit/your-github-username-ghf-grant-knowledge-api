@@ -266,39 +266,42 @@ export class GrantSearchService {
       .sort((a, b) => this.candidateSearchPriority(b, terms) - this.candidateSearchPriority(a, terms));
 
     const rankedResults: RankedResult[] = [];
+    const candidatesToInspect = rankedCandidates.slice(0, Math.max(maxResults * 2, 6));
+    const downloadConcurrency = 3;
 
-    for (const candidate of rankedCandidates.slice(0, maxResults * 4)) {
-      let excerpt: { excerpt: string; score: number };
+    for (let index = 0; index < candidatesToInspect.length; index += downloadConcurrency) {
+      const batch = candidatesToInspect.slice(index, index + downloadConcurrency);
+      const batchResults = await Promise.all(batch.map(async (candidate): Promise<RankedResult | null> => {
+        try {
+          const downloaded = await this.sourceRepository.downloadText(candidate.path);
+          const excerpt = bestExcerpt(downloaded.text, terms, maxChars);
+          if (!excerpt.excerpt) {
+            return null;
+          }
 
-      try {
-        const downloaded = await this.sourceRepository.downloadText(candidate.path);
-        excerpt = bestExcerpt(downloaded.text, terms, maxChars);
-      } catch {
-        continue;
-      }
+          const priorityScore = this.candidateSearchPriority(candidate, terms);
+          const score = passageScore(excerpt.excerpt, terms) + Math.floor(priorityScore / 3);
 
-      if (!excerpt.excerpt) {
-        continue;
-      }
+          return {
+            ...this.sourceMetadata(candidate),
+            source_file: candidate.source_file,
+            funder: inferFunder(candidate),
+            year: extractYear(candidate),
+            path: candidate.path,
+            excerpt: excerpt.excerpt,
+            confidence: confidenceFromScore(score),
+            document_type: inferDocumentType(candidate),
+            character_count: excerpt.excerpt.length,
+            notes: options.note,
+            score,
+            freshnessScore: this.freshnessScore(candidate.path)
+          };
+        } catch {
+          return null;
+        }
+      }));
 
-      const priorityScore = this.candidateSearchPriority(candidate, terms);
-      const score = passageScore(excerpt.excerpt, terms) + Math.floor(priorityScore / 3);
-
-      rankedResults.push({
-        ...this.sourceMetadata(candidate),
-        source_file: candidate.source_file,
-        funder: inferFunder(candidate),
-        year: extractYear(candidate),
-        path: candidate.path,
-        excerpt: excerpt.excerpt,
-        confidence: confidenceFromScore(score),
-        document_type: inferDocumentType(candidate),
-        character_count: excerpt.excerpt.length,
-        notes: options.note,
-        score,
-        freshnessScore: this.freshnessScore(candidate.path)
-      });
-
+      rankedResults.push(...batchResults.filter((result): result is RankedResult => result !== null));
       if (rankedResults.length >= maxResults * 2) {
         break;
       }
@@ -382,3 +385,4 @@ export class GrantSearchService {
     return 0;
   }
 }
+
