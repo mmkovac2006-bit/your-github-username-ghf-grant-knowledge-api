@@ -145,10 +145,7 @@ components:
         source_folder:
           type: string
           enum:
-            - _2026 Grants
-            - 2025 Grants
-            - 2024 Grants
-            - Grantwriting Resources
+            - Test Current Grant Library
         source_category:
           type: string
           enum: [approved_grant_folder, grantwriting_resources]
