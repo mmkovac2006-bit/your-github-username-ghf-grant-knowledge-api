@@ -284,8 +284,60 @@ describe("GHF Grant Knowledge API", () => {
 
     expect(searchedPaths).toEqual(allowedRoots);
     expect(searchedPaths).not.toContain(`${legacyGrantsRoot}/2023 Grants`);
-    expect(searchedPaths).not.toContain(allowedRoot);
+    expect(searchedPaths).not.toContain(legacyGrantsRoot);
     expect(namespaceHeaders.every((headers) => headers["Dropbox-API-Path-Root"]?.includes("5698749680"))).toBe(true);
+  });
+
+  it("falls back to a full current-library scan when broad content search finds too few candidates", async () => {
+    const fetchMock = vi.fn(async (url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => {
+      const endpoint = String(url);
+
+      if (endpoint.endsWith("/oauth2/token")) {
+        return new Response(JSON.stringify({ access_token: "dropbox-access-token", expires_in: 14_400 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      if (endpoint.endsWith("/files/search_v2")) {
+        return new Response(JSON.stringify({ matches: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      if (endpoint.endsWith("/files/list_folder")) {
+        return new Response(JSON.stringify({
+          entries: [{
+            ".tag": "file",
+            name: "Organization Overview.docx",
+            path_display: `${allowedRoot}/Organization Overview.docx`
+          }],
+          has_more: false
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const repository = new DropboxRepository(makeConfig({
+      DROPBOX_PATH_ROOT_NAMESPACE_ID: "5698749680"
+    }));
+    const result = await repository.searchFiles({
+      terms: ["mission", "history", "services"],
+      maxCandidates: 5
+    });
+
+    expect(result.files.map((file) => file.source_file)).toEqual(["Organization Overview.docx"]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/files/list_folder"))).toBe(true);
   });
 
   it("bounds verbose Dropbox searches and shares one token refresh", async () => {
