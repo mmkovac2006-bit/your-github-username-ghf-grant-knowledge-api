@@ -649,6 +649,8 @@ describe("GHF Grant Knowledge API", () => {
     expect(isBlockedPath(`${allowedRoot}/2025 Grants/Attachments/Program Overview.docx`)).toBe(false);
     expect(isBlockedPath(`${allowedRoot}/2025 Grants/HR/Staffing.docx`)).toBe(true);
     expect(isBlockedPath(`${allowedRoot}/2025 Grants/Funder/Audited Financials 2023.pdf`)).toBe(true);
+    expect(isBlockedPath(`${allowedRoot}/1 - Current list with contact info.pdf`)).toBe(true);
+    expect(isBlockedPath(`${allowedRoot}/Over $2500 Since 4.30.25.xlsx`)).toBe(true);
   });
 });
 
