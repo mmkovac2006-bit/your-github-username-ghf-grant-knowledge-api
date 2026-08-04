@@ -2,7 +2,7 @@
 
 Version 1 is intentionally simple:
 
-Kevin pastes a grant question or full grant application into the Custom GPT. The GPT calls this API. The API searches only approved past grant and grantwriting folders in Dropbox, prioritizes relevant and newer material, and returns short source excerpts. The GPT uses those excerpts to fill out the grant with no extra commentary.
+Kevin pastes a grant question or full grant application into the Custom GPT. The GPT calls this API. The API searches only the approved current grant library folder in Dropbox, prioritizes relevant and newer material, and returns short source excerpts. The GPT uses those excerpts to fill out the grant with no extra commentary.
 
 Dropbox is the live master database for v1. This API does not use Supabase, Postgres, a private database, a vector database, a separate document store, a copied grant database, or a background ingestion pipeline for v1 search.
 
@@ -18,12 +18,9 @@ The API retrieves and ranks source excerpts only. The Custom GPT is responsible 
 
 ## Approved Dropbox Folders
 
-The server always searches only these folders:
+The server always searches only this test library folder:
 
-- `/4 - Development/1 - Grants/_2026 Grants`
-- `/4 - Development/1 - Grants/2025 Grants`
-- `/4 - Development/1 - Grants/2024 Grants`
-- `/4 - Development/1 - Grants/Grantwriting Resources`
+- `/4 - Development/Test Current Grant Library`
 
 Kevin and the GPT do not choose folders, years, paths, Dropbox roots, namespaces, search locations, databases, or source systems. If a request includes those fields, v1 ignores them for search scope. The allowlist is enforced in middleware, and results outside the approved folders are filtered out.
 
@@ -49,7 +46,7 @@ GHF_ACTION_API_KEY=replace_with_long_random_secret
 DROPBOX_APP_KEY=replace_with_dropbox_app_key
 DROPBOX_APP_SECRET=replace_with_dropbox_app_secret
 DROPBOX_REFRESH_TOKEN=replace_with_refresh_token
-DROPBOX_ALLOWED_ROOTS="/4 - Development/1 - Grants/_2026 Grants|/4 - Development/1 - Grants/2025 Grants|/4 - Development/1 - Grants/2024 Grants|/4 - Development/1 - Grants/Grantwriting Resources"
+DROPBOX_ALLOWED_ROOTS="/4 - Development/Test Current Grant Library"
 ```
 
 Optional shared/team namespace:
@@ -159,19 +156,16 @@ The server ignores request-supplied `folder`, `path`, `root`, `year`, `database`
   "query_characters": 78,
   "source": "dropbox",
   "searched_folders": [
-    "/4 - Development/1 - Grants/_2026 Grants",
-    "/4 - Development/1 - Grants/2025 Grants",
-    "/4 - Development/1 - Grants/2024 Grants",
-    "/4 - Development/1 - Grants/Grantwriting Resources"
+    "/4 - Development/Test Current Grant Library"
   ],
   "results": [
     {
       "rank": 1,
       "title": "Example Grant Application",
       "source_file": "Example Grant Application.docx",
-      "path": "/4 - Development/1 - Grants/2025 Grants/Example/Example Grant Application.docx",
-      "source_path": "/4 - Development/1 - Grants/2025 Grants/Example/Example Grant Application.docx",
-      "source_folder": "2025 Grants",
+      "path": "/4 - Development/Test Current Grant Library/Example Grant Application.docx",
+      "source_path": "/4 - Development/Test Current Grant Library/Example Grant Application.docx",
+      "source_folder": "Test Current Grant Library",
       "source_category": "approved_grant_folder",
       "year": "2025",
       "excerpt": "Short relevant Dropbox excerpt...",
@@ -181,7 +175,7 @@ The server ignores request-supplied `folder`, `path`, `root`, `year`, `database`
 }
 ```
 
-Ranking is relevance-first. When relevance is similar, `_2026 Grants` is boosted first, then `2025 Grants`, then `2024 Grants`, then `Grantwriting Resources`.
+Ranking is relevance-first within the curated test current grant library.
 
 ## Custom GPT Action Setup
 
@@ -206,7 +200,7 @@ For Vercel, add these environment variables manually:
 - `DROPBOX_APP_SECRET`
 - `DROPBOX_REFRESH_TOKEN`
 - `DROPBOX_PATH_ROOT_NAMESPACE_ID=5698749680`
-- `DROPBOX_ALLOWED_ROOTS=/4 - Development/1 - Grants/_2026 Grants|/4 - Development/1 - Grants/2025 Grants|/4 - Development/1 - Grants/2024 Grants|/4 - Development/1 - Grants/Grantwriting Resources`
+- `DROPBOX_ALLOWED_ROOTS=/4 - Development/Test Current Grant Library`
 - `MAX_RESULTS_DEFAULT=5`
 - `MAX_RESULTS_LIMIT=10`
 - `MAX_EXCERPT_CHARS=2000`
