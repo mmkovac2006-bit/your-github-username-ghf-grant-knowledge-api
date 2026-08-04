@@ -20,7 +20,7 @@ services:
       - key: DROPBOX_PATH_ROOT_NAMESPACE_ID
         value: "5698749680"
       - key: DROPBOX_ALLOWED_ROOTS
-        value: /4 - Development/1 - Grants/_2026 Grants|/4 - Development/1 - Grants/2025 Grants|/4 - Development/1 - Grants/2024 Grants|/4 - Development/1 - Grants/Grantwriting Resources
+        value: /4 - Development/Test Current Grant Library
       - key: MAX_RESULTS_DEFAULT
         value: "5"
       - key: MAX_RESULTS_LIMIT
