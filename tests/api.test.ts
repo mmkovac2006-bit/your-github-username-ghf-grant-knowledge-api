@@ -6,7 +6,8 @@ import { createConfig, DEFAULT_DROPBOX_ALLOWED_ROOTS, type AppConfig } from "../
 import { isBlockedPath } from "../src/utils/security";
 import { MockDropboxRepository, type MockDropboxFile } from "./mockDropboxRepository";
 
-const allowedRoot = "/4 - Development/1 - Grants";
+const allowedRoot = "/4 - Development/Test Current Grant Library";
+const legacyGrantsRoot = "/4 - Development/1 - Grants";
 const allowedRoots = DEFAULT_DROPBOX_ALLOWED_ROOTS;
 const allowedRootsValue = allowedRoots.join("|");
 const apiKey = "test-api-key";
@@ -68,7 +69,7 @@ function baseFiles(): MockDropboxFile[] {
       ].join("\n\n")
     },
     {
-      path: `${allowedRoot}/2023 Grants/Grant Summary 2023.docx`,
+      path: `${legacyGrantsRoot}/2023 Grants/Grant Summary 2023.docx`,
       source_file: "Grant Summary 2023.docx",
       text: "The annual grant summary mentions Lyda Hill alongside several other funders."
     },
@@ -173,7 +174,7 @@ describe("GHF Grant Knowledge API", () => {
         text: grantText("demographics override")
       },
       {
-        path: `${allowedRoot}/2023 Grants/Outside Folder.docx`,
+        path: `${legacyGrantsRoot}/2023 Grants/Outside Folder.docx`,
         source_file: "Outside Folder.docx",
         text: "outside-only override outside-only override demographics"
       }
@@ -184,11 +185,11 @@ describe("GHF Grant Knowledge API", () => {
       .set("Authorization", `Bearer ${apiKey}`)
       .send({
         query: "demographics outside-only override",
-        folder: `${allowedRoot}/2023 Grants`,
+        folder: `${legacyGrantsRoot}/2023 Grants`,
         root: allowedRoot,
-        path: `${allowedRoot}/2023 Grants/Outside Folder.docx`,
+        path: `${legacyGrantsRoot}/2023 Grants/Outside Folder.docx`,
         year: "2023",
-        search_location: `${allowedRoot}/2023 Grants`
+        search_location: `${legacyGrantsRoot}/2023 Grants`
       });
 
     expect(response.status).toBe(200);
@@ -227,7 +228,7 @@ describe("GHF Grant Knowledge API", () => {
     expect(config.dropboxAllowedRoot).toBe("/4 - Development/1 - Grants/_2026 Grants");
   });
 
-  it("defaults Dropbox search roots to scoped current folders and excludes 2023", () => {
+  it("defaults Dropbox search to the current grant library and excludes legacy yearly folders", () => {
     const config = makeConfig({
       DROPBOX_ALLOWED_SEARCH_FOLDERS: "",
       DROPBOX_ALLOWED_ROOTS: "",
@@ -236,7 +237,7 @@ describe("GHF Grant Knowledge API", () => {
 
     expect(config.dropboxAllowedRoots).toEqual(allowedRoots);
     expect(config.dropboxAllowedRoots.some((root) => root.includes("2023 Grants"))).toBe(false);
-    expect(config.dropboxAllowedRoot).toBe("/4 - Development/1 - Grants/_2026 Grants");
+    expect(config.dropboxAllowedRoot).toBe(allowedRoot);
   });
 
   it("searches only the scoped Dropbox roots by default", async () => {
@@ -282,7 +283,7 @@ describe("GHF Grant Knowledge API", () => {
     const namespaceHeaders = searchCalls.map(([, init]) => init?.headers as Record<string, string>);
 
     expect(searchedPaths).toEqual(allowedRoots);
-    expect(searchedPaths).not.toContain(`${allowedRoot}/2023 Grants`);
+    expect(searchedPaths).not.toContain(`${legacyGrantsRoot}/2023 Grants`);
     expect(searchedPaths).not.toContain(allowedRoot);
     expect(namespaceHeaders.every((headers) => headers["Dropbox-API-Path-Root"]?.includes("5698749680"))).toBe(true);
   });
@@ -370,7 +371,7 @@ describe("GHF Grant Knowledge API", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.configured.credentials.all).toBe(true);
-    expect(response.body.configured.allowed_root).toBe("/4 - Development/1 - Grants/_2026 Grants");
+    expect(response.body.configured.allowed_root).toBe(allowedRoot);
     expect(response.body.configured.allowed_roots).toEqual(allowedRoots);
     expect(response.body.lyda_hill_search).toMatchObject({
       ok: true,
@@ -425,10 +426,10 @@ describe("GHF Grant Knowledge API", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.results.map((result: { source_folder: string }) => result.source_folder)).toEqual([
-      "_2026 Grants",
-      "2025 Grants",
-      "2024 Grants",
-      "Grantwriting Resources"
+      "Test Current Grant Library",
+      "Test Current Grant Library",
+      "Test Current Grant Library",
+      "Test Current Grant Library"
     ]);
   });
 
