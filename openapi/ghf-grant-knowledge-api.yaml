@@ -39,6 +39,7 @@ paths:
   /search:
     post:
       operationId: searchGrantSources
+      x-openai-isConsequential: false
       summary: Find relevant Dropbox source excerpts for a grant question or pasted grant application.
       description: >
         Search approved GHF Dropbox folders for source excerpts relevant to a
