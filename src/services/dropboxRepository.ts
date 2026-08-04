@@ -116,8 +116,9 @@ export class DropboxRepository implements SourceRepository {
       );
     }
 
-    if (candidateMap.size === 0) {
-      const fallbackResult = await this.listFolderFallback(queryTerms.length ? queryTerms : terms, input.maxCandidates);
+    const minimumCandidateCount = Math.min(input.maxCandidates, 6);
+    if (candidateMap.size < minimumCandidateCount) {
+      const fallbackResult = await this.listFolderFallback([], input.maxCandidates);
       restrictedSkipped += fallbackResult.restrictedSkipped;
 
       for (const candidate of fallbackResult.files) {
@@ -126,7 +127,9 @@ export class DropboxRepository implements SourceRepository {
     }
 
     return {
-      files: [...candidateMap.values()].slice(0, input.maxCandidates),
+      files: [...candidateMap.values()]
+        .sort((a, b) => candidatePriority(b) - candidatePriority(a))
+        .slice(0, input.maxCandidates),
       restrictedSkipped
     };
   }
@@ -383,6 +386,7 @@ export class DropboxRepository implements SourceRepository {
   private dropboxQueryTerms(terms: string[]): string[] {
     const nonYearTerms = uniqueTerms(terms)
       .filter((term) => !/^20\d{2}$/.test(term.trim()))
+      .filter((term) => !/^\d+$/.test(term.trim()))
       .filter((term) => !GENERIC_DROPBOX_QUERY_TERMS.has(term.trim().toLowerCase()));
     const multiWordTerms = nonYearTerms.filter((term) => /\s/.test(term.trim()));
     const singleTerms = nonYearTerms.filter((term) => !/\s/.test(term.trim()));
