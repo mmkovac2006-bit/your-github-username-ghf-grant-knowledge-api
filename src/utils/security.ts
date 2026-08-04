@@ -19,6 +19,8 @@ export const BLOCKED_PATTERNS = [
   "Account",
   "Routing",
   "Staff Contact",
+  "Contact Info",
+  "Over $2500",
   "Personal",
   "Confidential"
 ];
