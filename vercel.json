@@ -10,5 +10,8 @@
     "api/index.ts": {
       "maxDuration": 60
     }
+  },
+  "env": {
+    "DROPBOX_ALLOWED_ROOTS": "/4 - Development/Test Current Grant Library"
   }
 }
