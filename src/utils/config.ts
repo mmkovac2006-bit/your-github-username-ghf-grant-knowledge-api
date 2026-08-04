@@ -4,10 +4,7 @@ import { z } from "zod";
 dotenv.config();
 
 export const DEFAULT_DROPBOX_ALLOWED_ROOTS = [
-  "/4 - Development/1 - Grants/_2026 Grants",
-  "/4 - Development/1 - Grants/2025 Grants",
-  "/4 - Development/1 - Grants/2024 Grants",
-  "/4 - Development/1 - Grants/Grantwriting Resources"
+  "/4 - Development/Test Current Grant Library"
 ];
 
 const LEGACY_BROAD_DROPBOX_ROOT = "/4 - Development/1 - Grants";
