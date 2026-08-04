@@ -1,11 +1,20 @@
 import type { AppConfig } from "../utils/config";
-import { AppError, upstreamError } from "../utils/errors";
+import {
+  AppError,
+  blockedFileOperationError,
+  dropboxOperationError,
+  dropboxWriteDisabledError,
+  invalidRequestError,
+  upstreamError
+} from "../utils/errors";
 import {
   hasConfiguredDropbox,
   isBlockedPath,
+  isInsideAllowedRoot,
   isInsideAllowedRoots,
   normalizeDropboxPath
 } from "../utils/security";
+import { isScannableExtension } from "../utils/documentMetadata";
 import { candidatePriority, isSupportedFile, tokenize, uniqueTerms } from "../utils/search";
 import type {
   DownloadedText,
@@ -15,6 +24,11 @@ import type {
   SourceSearchInput,
   SourceSearchResult
 } from "../types/search";
+import type {
+  DropboxFileManager,
+  DropboxFileOperationResult,
+  DropboxUploadTarget
+} from "../types/files";
 import { extractTextFromBuffer, getSourceFileName } from "./textExtraction";
 
 type DropboxFileMetadata = {
@@ -56,6 +70,18 @@ type AccessTokenState = {
   expiresAt: number;
 };
 
+type DropboxWriteMetadata = {
+  name?: string;
+  path_display?: string;
+  id?: string;
+  rev?: string;
+  size?: number;
+};
+
+type DropboxMoveResponse = {
+  metadata?: DropboxWriteMetadata;
+};
+
 const MAX_DROPBOX_QUERY_TERMS = 2;
 const GENERIC_DROPBOX_QUERY_TERMS = new Set([
   "document",
@@ -74,7 +100,7 @@ const GENERIC_DROPBOX_QUERY_TERMS = new Set([
   "sources"
 ]);
 
-export class DropboxRepository implements SourceRepository {
+export class DropboxRepository implements SourceRepository, DropboxFileManager {
   private accessToken: AccessTokenState | null = null;
   private accessTokenRequest: Promise<string> | null = null;
 
@@ -176,6 +202,120 @@ export class DropboxRepository implements SourceRepository {
       throw upstreamError();
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  async uploadFile(input: {
+    target: DropboxUploadTarget;
+    fileName: string;
+    content: Buffer;
+  }): Promise<DropboxFileOperationResult> {
+    this.assertWriteConfigured();
+
+    const fileName = input.fileName.trim();
+    if (!fileName || /[\\/\0]/.test(fileName) || fileName === "." || fileName === "..") {
+      throw invalidRequestError("The filename is invalid.");
+    }
+    if (!isScannableExtension(fileName)) {
+      throw invalidRequestError("This file type is not allowed.");
+    }
+    if (input.content.length === 0 || input.content.length > this.config.dropboxMaxUploadBytes) {
+      throw invalidRequestError("The uploaded file is empty or exceeds the configured size limit.");
+    }
+
+    const root = input.target === "current_grant_library"
+      ? this.config.dropboxCurrentLibraryRoot
+      : this.config.dropboxCurrentSubmittedRoot;
+    const destinationPath = normalizeDropboxPath(`${root}/${fileName}`);
+    this.assertSafeWritePath(destinationPath, root);
+
+    const token = await this.getAccessToken();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
+
+    try {
+      const response = await fetch("https://content.dropboxapi.com/2/files/upload", {
+        method: "POST",
+        headers: {
+          ...this.authorizationHeaders(token),
+          ...this.pathRootHeaders(),
+          "Content-Type": "application/octet-stream",
+          "Dropbox-API-Arg": JSON.stringify({
+            path: destinationPath,
+            mode: "add",
+            autorename: true,
+            mute: false,
+            strict_conflict: false
+          })
+        },
+        body: new Uint8Array(input.content),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        await this.logFailedResponse("files/upload", response);
+        throw dropboxOperationError();
+      }
+
+      return this.toFileOperationResult(await response.json() as DropboxWriteMetadata, destinationPath);
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      this.logDropboxException("files/upload", error);
+      throw dropboxOperationError();
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async moveToArchive(sourcePath: string): Promise<DropboxFileOperationResult & { from_path: string }> {
+    this.assertWriteConfigured();
+
+    const normalizedSource = normalizeDropboxPath(sourcePath);
+    const mappings = [
+      {
+        current: this.config.dropboxCurrentLibraryRoot,
+        archive: this.config.dropboxArchiveLibraryRoot
+      },
+      {
+        current: this.config.dropboxCurrentSubmittedRoot,
+        archive: this.config.dropboxArchiveSubmittedRoot
+      }
+    ];
+    const mapping = mappings.find(({ current }) => isInsideAllowedRoot(normalizedSource, current));
+
+    if (!mapping || normalizedSource.toLowerCase() === normalizeDropboxPath(mapping.current).toLowerCase()) {
+      throw invalidRequestError("Only files inside an approved current folder can be archived.");
+    }
+    if (isBlockedPath(normalizedSource)) {
+      throw blockedFileOperationError();
+    }
+
+    const relativePath = normalizedSource.slice(normalizeDropboxPath(mapping.current).length).replace(/^\/+/, "");
+    if (!relativePath) {
+      throw invalidRequestError("A source file path is required.");
+    }
+    const destinationPath = normalizeDropboxPath(`${mapping.archive}/${relativePath}`);
+    this.assertSafeWritePath(destinationPath, mapping.archive);
+
+    try {
+      const response = await this.rpc<DropboxMoveResponse>("files/move_v2", {
+        from_path: normalizedSource,
+        to_path: destinationPath,
+        autorename: true,
+        allow_ownership_transfer: false
+      });
+      const result = this.toFileOperationResult(response.metadata ?? {}, destinationPath);
+      return {
+        ...result,
+        from_path: normalizedSource
+      };
+    } catch (error) {
+      if (error instanceof AppError && error.code !== "upstream_error") {
+        throw error;
+      }
+      throw dropboxOperationError();
     }
   }
 
@@ -400,6 +540,33 @@ export class DropboxRepository implements SourceRepository {
     if (!hasConfiguredDropbox(this.config)) {
       throw upstreamError();
     }
+  }
+
+  private assertWriteConfigured(): void {
+    if (!this.config.dropboxWriteEnabled) {
+      throw dropboxWriteDisabledError();
+    }
+    this.assertConfigured();
+  }
+
+  private assertSafeWritePath(path: string, allowedRoot: string): void {
+    if (!isInsideAllowedRoot(path, allowedRoot)) {
+      throw invalidRequestError("The destination is outside the approved Dropbox folder.");
+    }
+    if (isBlockedPath(path)) {
+      throw blockedFileOperationError();
+    }
+  }
+
+  private toFileOperationResult(metadata: DropboxWriteMetadata, fallbackPath: string): DropboxFileOperationResult {
+    const path = normalizeDropboxPath(metadata.path_display ?? fallbackPath);
+    return {
+      name: metadata.name ?? path.split("/").pop() ?? "file",
+      path,
+      id: metadata.id ?? null,
+      rev: metadata.rev ?? null,
+      size: metadata.size ?? null
+    };
   }
 
   private async rpc<T>(endpoint: string, body: unknown, options: { pathRoot?: boolean } = {}): Promise<T> {

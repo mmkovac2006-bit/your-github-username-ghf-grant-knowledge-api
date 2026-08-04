@@ -1,10 +1,11 @@
 import express from "express";
 import { createDebugRouter } from "./routes/debug";
+import { createFilesRouter } from "./routes/files";
 import { createHealthRouter } from "./routes/health";
 import { createSearchRouter } from "./routes/search";
 import { DropboxRepository } from "./services/dropboxRepository";
 import { GrantSearchService } from "./services/grantSearchService";
-import { PostgresRepository } from "./services/postgresRepository";
+import type { DropboxFileManager } from "./types/files";
 import type { SourceRepository } from "./types/search";
 import { createConfig, type AppConfig } from "./utils/config";
 import { errorHandler } from "./utils/errors";
@@ -16,16 +17,18 @@ import { requestTimeout } from "./middleware/requestTimeout";
 export type CreateAppOptions = {
   config?: AppConfig;
   sourceRepository?: SourceRepository;
+  fileManager?: DropboxFileManager;
 };
 
 export function createApp(options: CreateAppOptions = {}) {
   const config = options.config ?? createConfig();
-  const sourceRepository = options.sourceRepository ?? createSourceRepository(config);
+  const dropboxRepository = options.sourceRepository ? null : new DropboxRepository(config);
+  const sourceRepository = options.sourceRepository ?? dropboxRepository!;
+  const fileManager = options.fileManager ?? dropboxRepository;
   const searchService = new GrantSearchService(sourceRepository, config);
   const app = express();
 
   app.disable("x-powered-by");
-  app.use(express.json({ limit: "64kb" }));
   app.use(requestTimeout(config));
   app.use(requestLogger(config));
 
@@ -34,6 +37,8 @@ export function createApp(options: CreateAppOptions = {}) {
   const protectedRouter = express.Router();
   protectedRouter.use(basicRateLimit());
   protectedRouter.use(requireApiKey(config));
+  protectedRouter.use(createFilesRouter(config, fileManager));
+  protectedRouter.use(express.json({ limit: "64kb" }));
   protectedRouter.use(createDebugRouter(config, sourceRepository));
   protectedRouter.use(createSearchRouter(searchService));
   app.use(protectedRouter);
@@ -48,14 +53,6 @@ export function createApp(options: CreateAppOptions = {}) {
   app.use(errorHandler);
 
   return app;
-}
-
-function createSourceRepository(config: AppConfig): SourceRepository {
-  if (config.searchBackend === "database" && config.databaseUrl) {
-    return new PostgresRepository(config);
-  }
-
-  return new DropboxRepository(config);
 }
 
 export default createApp();

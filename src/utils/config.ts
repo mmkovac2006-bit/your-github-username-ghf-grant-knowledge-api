@@ -23,6 +23,12 @@ const envSchema = z.object({
   DROPBOX_ALLOWED_SEARCH_FOLDERS: z.string().default(""),
   DROPBOX_ALLOWED_ROOTS: z.string().default(""),
   DROPBOX_ALLOWED_ROOT: z.string().default(""),
+  DROPBOX_WRITE_ENABLED: z.string().default("false"),
+  DROPBOX_CURRENT_LIBRARY_ROOT: z.string().default(""),
+  DROPBOX_ARCHIVE_LIBRARY_ROOT: z.string().default("/4 - Development/Archive Grant Documents"),
+  DROPBOX_CURRENT_SUBMITTED_ROOT: z.string().default("/4 - Development/Current Grants Submitted"),
+  DROPBOX_ARCHIVE_SUBMITTED_ROOT: z.string().default("/4 - Development/Archive Grants Submitted"),
+  DROPBOX_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().max(10_000_000).default(5_000_000),
   SEARCH_BACKEND: z.enum(["dropbox", "database"]).default("dropbox"),
   DATABASE_URL: z.string().default(""),
   DATABASE_MAX_CONNECTIONS: z.coerce.number().int().positive().default(3),
@@ -43,6 +49,12 @@ export type AppConfig = {
   dropboxNamespaceId: string;
   dropboxAllowedRoots: string[];
   dropboxAllowedRoot: string;
+  dropboxWriteEnabled: boolean;
+  dropboxCurrentLibraryRoot: string;
+  dropboxArchiveLibraryRoot: string;
+  dropboxCurrentSubmittedRoot: string;
+  dropboxArchiveSubmittedRoot: string;
+  dropboxMaxUploadBytes: number;
   searchBackend: "dropbox" | "database";
   databaseUrl: string;
   databaseMaxConnections: number;
@@ -61,6 +73,10 @@ function normalizeConfiguredDropboxPath(path: string): string {
 
 function firstConfiguredValue(...values: string[]): string {
   return values.find((value) => value.trim().length > 0)?.trim() ?? "";
+}
+
+function parseBoolean(value: string): boolean {
+  return /^(1|true|yes|on)$/i.test(value.trim());
 }
 
 function uniqueNormalizedRoots(rawRoots: string): string[] {
@@ -113,6 +129,14 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dropboxNamespaceId: firstConfiguredValue(parsed.DROPBOX_PATH_ROOT_NAMESPACE_ID, parsed.DROPBOX_NAMESPACE_ID),
     dropboxAllowedRoots,
     dropboxAllowedRoot: dropboxAllowedRoots[0],
+    dropboxWriteEnabled: parseBoolean(parsed.DROPBOX_WRITE_ENABLED),
+    dropboxCurrentLibraryRoot: parsed.DROPBOX_CURRENT_LIBRARY_ROOT.trim()
+      ? normalizeConfiguredDropboxPath(parsed.DROPBOX_CURRENT_LIBRARY_ROOT)
+      : dropboxAllowedRoots[0],
+    dropboxArchiveLibraryRoot: normalizeConfiguredDropboxPath(parsed.DROPBOX_ARCHIVE_LIBRARY_ROOT),
+    dropboxCurrentSubmittedRoot: normalizeConfiguredDropboxPath(parsed.DROPBOX_CURRENT_SUBMITTED_ROOT),
+    dropboxArchiveSubmittedRoot: normalizeConfiguredDropboxPath(parsed.DROPBOX_ARCHIVE_SUBMITTED_ROOT),
+    dropboxMaxUploadBytes: parsed.DROPBOX_MAX_UPLOAD_BYTES,
     searchBackend: "dropbox",
     databaseUrl: parsed.DATABASE_URL.trim(),
     databaseMaxConnections: parsed.DATABASE_MAX_CONNECTIONS,

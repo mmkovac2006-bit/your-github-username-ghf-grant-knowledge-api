@@ -1,7 +1,7 @@
 {
   "name": "ghf-grant-knowledge-api",
   "version": "1.0.0",
-  "description": "Secure read-only middleware API for retrieving reusable Grant Halliburton Foundation grant language from Dropbox.",
+  "description": "Secure middleware API for retrieving and managing approved Grant Halliburton Foundation grant files in Dropbox.",
   "main": "dist/server.js",
   "type": "commonjs",
   "packageManager": "pnpm@11.7.0",

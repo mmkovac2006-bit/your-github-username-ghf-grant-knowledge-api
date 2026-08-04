@@ -2,6 +2,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
 import { DropboxRepository } from "../src/services/dropboxRepository";
+import type { DropboxFileManager } from "../src/types/files";
 import { createConfig, DEFAULT_DROPBOX_ALLOWED_ROOTS, type AppConfig } from "../src/utils/config";
 import { isBlockedPath } from "../src/utils/security";
 import { MockDropboxRepository, type MockDropboxFile } from "./mockDropboxRepository";
@@ -651,6 +652,244 @@ describe("GHF Grant Knowledge API", () => {
     expect(isBlockedPath(`${allowedRoot}/2025 Grants/Funder/Audited Financials 2023.pdf`)).toBe(true);
     expect(isBlockedPath(`${allowedRoot}/1 - Current list with contact info.pdf`)).toBe(true);
     expect(isBlockedPath(`${allowedRoot}/Over $2500 Since 4.30.25.xlsx`)).toBe(true);
+  });
+
+  it("keeps Dropbox writes disabled unless explicitly enabled", async () => {
+    const fileManager: DropboxFileManager = {
+      uploadFile: vi.fn(),
+      moveToArchive: vi.fn()
+    };
+    const app = createApp({
+      config: makeConfig(),
+      sourceRepository: new MockDropboxRepository(baseFiles()),
+      fileManager
+    });
+
+    const response = await request(app)
+      .post("/files/upload")
+      .set("Authorization", `Bearer ${apiKey}`)
+      .send({
+        target: "current_grant_library",
+        file_name: "New Grant Notes.txt",
+        content_text: "Verified grant notes",
+        confirmed: true
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({
+      error: "write_disabled",
+      message: "Dropbox file changes are not enabled."
+    });
+    expect(fileManager.uploadFile).not.toHaveBeenCalled();
+  });
+
+  it("uploads a confirmed file only to a named current-folder target", async () => {
+    const uploadFile = vi.fn(async () => ({
+      name: "New Grant Notes.txt",
+      path: `${allowedRoot}/New Grant Notes.txt`,
+      id: "id:new-file",
+      rev: "rev-1",
+      size: 20
+    }));
+    const fileManager: DropboxFileManager = {
+      uploadFile,
+      moveToArchive: vi.fn()
+    };
+    const app = createApp({
+      config: makeConfig({ DROPBOX_WRITE_ENABLED: "true" }),
+      sourceRepository: new MockDropboxRepository(baseFiles()),
+      fileManager
+    });
+
+    const response = await request(app)
+      .post("/files/upload")
+      .set("Authorization", `Bearer ${apiKey}`)
+      .send({
+        target: "current_grant_library",
+        file_name: "New Grant Notes.txt",
+        content_text: "Verified grant notes",
+        confirmed: true
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      status: "uploaded",
+      target: "current_grant_library",
+      file: {
+        name: "New Grant Notes.txt",
+        path: `${allowedRoot}/New Grant Notes.txt`
+      }
+    });
+    expect(uploadFile).toHaveBeenCalledWith({
+      target: "current_grant_library",
+      fileName: "New Grant Notes.txt",
+      content: Buffer.from("Verified grant notes", "utf8")
+    });
+  });
+
+  it("requires explicit confirmation for every Dropbox write", async () => {
+    const fileManager: DropboxFileManager = {
+      uploadFile: vi.fn(),
+      moveToArchive: vi.fn()
+    };
+    const app = createApp({
+      config: makeConfig({ DROPBOX_WRITE_ENABLED: "true" }),
+      sourceRepository: new MockDropboxRepository(baseFiles()),
+      fileManager
+    });
+
+    const response = await request(app)
+      .post("/files/move-to-archive")
+      .set("Authorization", `Bearer ${apiKey}`)
+      .send({
+        source_path: `${allowedRoot}/New Grant Notes.txt`,
+        confirmed: false
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("invalid_request");
+    expect(fileManager.moveToArchive).not.toHaveBeenCalled();
+  });
+
+  it("rejects text content disguised as a Word document", async () => {
+    const fileManager: DropboxFileManager = {
+      uploadFile: vi.fn(),
+      moveToArchive: vi.fn()
+    };
+    const app = createApp({
+      config: makeConfig({ DROPBOX_WRITE_ENABLED: "true" }),
+      sourceRepository: new MockDropboxRepository(baseFiles()),
+      fileManager
+    });
+
+    const response = await request(app)
+      .post("/files/upload")
+      .set("Authorization", `Bearer ${apiKey}`)
+      .send({
+        target: "current_grant_library",
+        file_name: "Not Really Word.docx",
+        content_text: "plain text",
+        confirmed: true
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Text content must use a .txt, .md, or .csv filename.");
+  });
+
+  it("uploads to Dropbox with add-and-autorename semantics and namespace support", async () => {
+    const fetchMock = vi.fn(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const endpoint = String(url);
+
+      if (endpoint.endsWith("/oauth2/token")) {
+        return new Response(JSON.stringify({ access_token: "dropbox-access-token", expires_in: 14_400 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      if (endpoint.endsWith("/files/upload")) {
+        const apiArg = JSON.parse(String((init?.headers as Record<string, string>)["Dropbox-API-Arg"]));
+        return new Response(JSON.stringify({
+          name: "New Grant Notes.txt",
+          path_display: apiArg.path,
+          id: "id:new-file",
+          rev: "rev-1",
+          size: 20
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const repository = new DropboxRepository(makeConfig({
+      DROPBOX_WRITE_ENABLED: "true",
+      DROPBOX_PATH_ROOT_NAMESPACE_ID: "5698749680"
+    }));
+    const result = await repository.uploadFile({
+      target: "current_grant_library",
+      fileName: "New Grant Notes.txt",
+      content: Buffer.from("Verified grant notes", "utf8")
+    });
+
+    expect(result.path).toBe(`${allowedRoot}/New Grant Notes.txt`);
+    const uploadCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/files/upload"));
+    const headers = uploadCall?.[1]?.headers as Record<string, string>;
+    const apiArg = JSON.parse(headers["Dropbox-API-Arg"]);
+    expect(apiArg).toMatchObject({
+      path: `${allowedRoot}/New Grant Notes.txt`,
+      mode: "add",
+      autorename: true
+    });
+    expect(headers["Dropbox-API-Path-Root"]).toContain("5698749680");
+  });
+
+  it("maps current-library files into the matching archive automatically", async () => {
+    const fetchMock = vi.fn(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const endpoint = String(url);
+
+      if (endpoint.endsWith("/oauth2/token")) {
+        return new Response(JSON.stringify({ access_token: "dropbox-access-token", expires_in: 14_400 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      if (endpoint.endsWith("/files/move_v2")) {
+        const body = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({
+          metadata: {
+            name: "Old Grant.docx",
+            path_display: body.to_path,
+            id: "id:moved-file",
+            rev: "rev-2"
+          }
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const repository = new DropboxRepository(makeConfig({ DROPBOX_WRITE_ENABLED: "true" }));
+    const sourcePath = `${allowedRoot}/2026 Grants/Funder/Old Grant.docx`;
+    const result = await repository.moveToArchive(sourcePath);
+
+    expect(result).toMatchObject({
+      from_path: sourcePath,
+      path: "/4 - Development/Archive Grant Documents/2026 Grants/Funder/Old Grant.docx"
+    });
+    const moveCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/files/move_v2"));
+    expect(JSON.parse(String(moveCall?.[1]?.body))).toMatchObject({
+      from_path: sourcePath,
+      to_path: "/4 - Development/Archive Grant Documents/2026 Grants/Funder/Old Grant.docx",
+      autorename: true,
+      allow_ownership_transfer: false
+    });
+  });
+
+  it("refuses restricted, traversal, and unapproved write paths", async () => {
+    const repository = new DropboxRepository(makeConfig({ DROPBOX_WRITE_ENABLED: "true" }));
+
+    await expect(repository.uploadFile({
+      target: "current_grant_library",
+      fileName: "Donor Contact Info.txt",
+      content: Buffer.from("restricted", "utf8")
+    })).rejects.toMatchObject({ code: "blocked_path" });
+
+    await expect(repository.moveToArchive(
+      `${allowedRoot}/../Archive Grant Documents/Old Grant.docx`
+    )).rejects.toMatchObject({ code: "invalid_request" });
+
+    await expect(repository.moveToArchive(
+      "/4 - Development/Unapproved Folder/Old Grant.docx"
+    )).rejects.toMatchObject({ code: "invalid_request" });
   });
 });
 

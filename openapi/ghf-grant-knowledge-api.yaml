@@ -106,6 +106,141 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /files/upload:
+    post:
+      operationId: uploadDropboxFile
+      x-openai-isConsequential: true
+      summary: Upload a confirmed file to an approved current Dropbox folder.
+      description: >
+        After explicit user confirmation, upload one supported file to the
+        current grant library or current submitted-grants folder. The server
+        selects the destination path and never overwrites an existing file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [target, file_name, confirmed]
+              properties:
+                target:
+                  type: string
+                  enum: [current_grant_library, current_grants_submitted]
+                file_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 180
+                content_base64:
+                  type: string
+                  maxLength: 7000000
+                  description: Base64 file bytes. Provide this or content_text, never both.
+                content_text:
+                  type: string
+                  maxLength: 5000000
+                  description: Plain text for a .txt, .md, or .csv file. Provide this or content_base64.
+                confirmed:
+                  type: boolean
+                  const: true
+                  description: True only after the user explicitly confirms this upload.
+      responses:
+        "201":
+          description: File uploaded without overwriting an existing file.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, target, file]
+                properties:
+                  status:
+                    type: string
+                    const: uploaded
+                  target:
+                    type: string
+                    enum: [current_grant_library, current_grants_submitted]
+                  file:
+                    $ref: "#/components/schemas/DropboxFile"
+        "400":
+          description: Invalid file request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Writes are disabled or the path is restricted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: File exceeds the configured size limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /files/move-to-archive:
+    post:
+      operationId: moveDropboxFileToArchive
+      x-openai-isConsequential: true
+      summary: Move a confirmed current Dropbox file into its matching archive.
+      description: >
+        After explicit user confirmation, move one approved current-library or
+        current-submitted file into its server-mapped archive. The request
+        cannot supply or override the destination path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [source_path, confirmed]
+              properties:
+                source_path:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+                  description: Exact safe path of a file in an approved current folder.
+                confirmed:
+                  type: boolean
+                  const: true
+                  description: True only after the user explicitly confirms this move.
+      responses:
+        "200":
+          description: File moved to its matching archive.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, file]
+                properties:
+                  status:
+                    type: string
+                    const: moved_to_archive
+                  file:
+                    allOf:
+                      - $ref: "#/components/schemas/DropboxFile"
+                      - type: object
+                        required: [from_path]
+                        properties:
+                          from_path:
+                            type: string
+        "400":
+          description: Invalid move request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Writes are disabled or the path is restricted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -120,6 +255,20 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    DropboxFile:
+      type: object
+      required: [name, path]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        id:
+          type: [string, "null"]
+        rev:
+          type: [string, "null"]
+        size:
+          type: [integer, "null"]
     SearchResult:
       type: object
       required: [rank, title, source_file, path, source_path, source_folder, source_category, excerpt, confidence]
