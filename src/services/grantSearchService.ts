@@ -8,6 +8,7 @@ import {
   candidatePriority,
   clampPositiveInteger,
   confidenceFromScore,
+  coverageExcerpt,
   extractYear,
   inferDocumentType,
   inferFunder,
@@ -274,7 +275,7 @@ export class GrantSearchService {
       const batchResults = await Promise.all(batch.map(async (candidate): Promise<RankedResult | null> => {
         try {
           const downloaded = await this.sourceRepository.downloadText(candidate.path);
-          const excerpt = bestExcerpt(downloaded.text, terms, maxChars);
+          const excerpt = coverageExcerpt(downloaded.text, terms, maxChars);
           if (!excerpt.excerpt) {
             return null;
           }
