@@ -82,6 +82,10 @@ type DropboxMoveResponse = {
   metadata?: DropboxWriteMetadata;
 };
 
+const SMALL_CORPUS_ENUMERATION_LIMIT = 40;
+const DOWNLOAD_CACHE_TTL_MS = 10 * 60 * 1000;
+const DOWNLOAD_CACHE_MAX_ENTRIES = 100;
+
 const MAX_DROPBOX_QUERY_TERMS = 2;
 const GENERIC_DROPBOX_QUERY_TERMS = new Set([
   "document",
@@ -108,6 +112,23 @@ export class DropboxRepository implements SourceRepository, DropboxFileManager {
 
   async searchFiles(input: SourceSearchInput): Promise<SourceSearchResult> {
     this.assertConfigured();
+
+    // Deterministic small-library mode: when the approved corpus is small,
+    // consider every approved file on every search instead of letting
+    // keyword matching decide which files are shortlisted. Ranking then
+    // happens on actual content downstream. This removes query-phrasing
+    // variance entirely and is cheaper (one list_folder vs many search_v2).
+    try {
+      const enumeration = await this.listFolderFallback([], SMALL_CORPUS_ENUMERATION_LIMIT + 1);
+      if (enumeration.files.length > 0 && enumeration.files.length <= SMALL_CORPUS_ENUMERATION_LIMIT) {
+        return {
+          files: enumeration.files.slice(0, Math.max(input.maxCandidates, 1)),
+          restrictedSkipped: enumeration.restrictedSkipped
+        };
+      }
+    } catch {
+      // Fall through to keyword search if enumeration fails.
+    }
 
     const terms = uniqueTerms(input.terms).slice(0, 20);
     const queryTerms = this.dropboxQueryTerms(terms).slice(0, 8);
@@ -160,10 +181,22 @@ export class DropboxRepository implements SourceRepository, DropboxFileManager {
     };
   }
 
+  private readonly downloadCache = new Map<string, { value: DownloadedText; fetchedAt: number }>();
+
   async downloadText(path: string): Promise<DownloadedText> {
     this.assertConfigured();
 
     const normalizedPath = normalizeDropboxPath(path);
+
+    // Short-TTL read-through cache. Dropbox remains the source of truth; this
+    // only avoids re-downloading the same file for every question within a
+    // few minutes, which keeps full-corpus inspection fast.
+    const cacheKey = normalizedPath.toLowerCase();
+    const cached = this.downloadCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < DOWNLOAD_CACHE_TTL_MS) {
+      return cached.value;
+    }
+
     const token = await this.getAccessToken();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
@@ -188,11 +221,21 @@ export class DropboxRepository implements SourceRepository, DropboxFileManager {
       const sourceFile = getSourceFileName(normalizedPath);
       const text = await extractTextFromBuffer(Buffer.from(arrayBuffer), sourceFile);
 
-      return {
+      const value: DownloadedText = {
         source_file: sourceFile,
         path: normalizedPath,
         text
       };
+
+      if (this.downloadCache.size >= DOWNLOAD_CACHE_MAX_ENTRIES) {
+        const oldestKey = this.downloadCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.downloadCache.delete(oldestKey);
+        }
+      }
+      this.downloadCache.set(cacheKey, { value, fetchedAt: Date.now() });
+
+      return value;
     } catch (error) {
       if (error instanceof AppError && error.code === "invalid_request") {
         throw error;

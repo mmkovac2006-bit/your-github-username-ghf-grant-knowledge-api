@@ -269,8 +269,14 @@ export class GrantSearchService {
       .sort((a, b) => this.candidateSearchPriority(b, terms) - this.candidateSearchPriority(a, terms));
 
     const rankedResults: RankedResult[] = [];
-    const candidatesToInspect = rankedCandidates.slice(0, Math.max(maxResults * 2, 6));
-    const downloadConcurrency = 3;
+    // Small corpora are inspected in full (deterministic; downloads are
+    // cached repository-side) with higher concurrency so wall-clock time
+    // stays at or below the partial-inspection path.
+    const inspectAll = rankedCandidates.length <= 24;
+    const candidatesToInspect = inspectAll
+      ? rankedCandidates
+      : rankedCandidates.slice(0, Math.max(maxResults * 2, 6));
+    const downloadConcurrency = inspectAll ? 6 : 3;
 
     for (let index = 0; index < candidatesToInspect.length; index += downloadConcurrency) {
       const batch = candidatesToInspect.slice(index, index + downloadConcurrency);
@@ -310,7 +316,7 @@ export class GrantSearchService {
       }));
 
       rankedResults.push(...batchResults.flat());
-      if (rankedResults.length >= maxResults * 2) {
+      if (!inspectAll && rankedResults.length >= maxResults * 2) {
         break;
       }
     }
