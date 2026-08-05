@@ -335,11 +335,43 @@ export function bestExcerpt(text: string, terms: string[], maxChars: number): { 
 }
 
 const COVERAGE_SEPARATOR = " […] ";
-const COVERAGE_MAX_EXTRA_PASSAGES = 3;
+const COVERAGE_MAX_EXTRA_PASSAGES = 4;
 const COVERAGE_MIN_REMAINING_CHARS = 160;
 const COVERAGE_OVERFLOW_ALLOWANCE = 200;
 const COVERAGE_NEW_TOKEN_BONUS = 2;
 const COVERAGE_MIN_ADDITION_VALUE = 1;
+
+const ENTITY_PHRASE_PATTERN = /[A-Z][a-zA-Z]*(?:\s+(?:[A-Z][a-zA-Z]*|of|the|and|for|in|to))*\s+[A-Z][a-zA-Z]*/g;
+const ENTITY_NOVELTY_BONUS = 2;
+const ENTITY_NOVELTY_CAP = 4;
+const ENTITY_LEAD_STOP = new Set(["the", "this", "these", "those", "a", "an", "our", "we", "during", "over", "today", "in", "for"]);
+
+/**
+ * Capitalized multi-word phrases (program names, initiative titles, partner
+ * organizations). These are the "specifics" a grant answer needs; passages
+ * introducing new ones deserve selection priority over interchangeable
+ * narrative passages that merely repeat query vocabulary.
+ */
+export function entityPhrases(passage: string): Set<string> {
+  const phrases = new Set<string>();
+
+  for (const match of passage.match(ENTITY_PHRASE_PATTERN) ?? []) {
+    const words = match.trim().split(/\s+/);
+    if (words.length < 2) {
+      continue;
+    }
+
+    const trimmed = ENTITY_LEAD_STOP.has(words[0].toLowerCase()) ? words.slice(1) : words;
+    const capitalized = trimmed.filter((word) => /^[A-Z]/.test(word));
+    if (trimmed.length < 2 || capitalized.length < 2) {
+      continue;
+    }
+
+    phrases.add(trimmed.join(" ").toLowerCase());
+  }
+
+  return phrases;
+}
 
 function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) {
@@ -368,26 +400,26 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
  * "programs" question, or a county-name list after an intro that already
  * mentions "counties").
  */
-export function coverageExcerpt(text: string, terms: string[], maxChars: number): { excerpt: string; score: number } {
-  const passages = splitIntoPassages(text, maxChars);
+const COVERAGE_PASSAGE_TARGET_CHARS = 700;
 
-  if (passages.length === 0) {
-    return { excerpt: "", score: 0 };
-  }
+type PassageEntry = {
+  passage: string;
+  index: number;
+  score: number;
+  tokens: Set<string>;
+  entities: Set<string>;
+};
 
-  const queryTokens = uniqueTerms(tokenize(terms.join(" "))).map((token) => token.toLowerCase());
-  const scored = passages
-    .map((passage, index) => ({
-      passage,
-      index,
-      score: passageScore(passage, terms),
-      tokens: new Set(tokenize(passage))
-    }))
-    .sort((a, b) => b.score - a.score || b.passage.length - a.passage.length);
-
-  const selected = [scored[0]];
-  const covered = new Set(queryTokens.filter((token) => scored[0].passage.toLowerCase().includes(token)));
-  let usedChars = scored[0].passage.length;
+function selectCoveragePassages(
+  entries: PassageEntry[],
+  queryTokens: string[],
+  maxChars: number
+): PassageEntry[] {
+  const ranked = [...entries].sort((a, b) => b.score - a.score || b.passage.length - a.passage.length);
+  const selected = [ranked[0]];
+  const covered = new Set(queryTokens.filter((token) => ranked[0].passage.toLowerCase().includes(token)));
+  const coveredEntities = new Set(ranked[0].entities);
+  let usedChars = ranked[0].passage.length;
 
   for (let additions = 0; additions < COVERAGE_MAX_EXTRA_PASSAGES; additions += 1) {
     const remaining = maxChars - usedChars;
@@ -395,10 +427,10 @@ export function coverageExcerpt(text: string, terms: string[], maxChars: number)
       break;
     }
 
-    let bestAddition: (typeof scored)[number] | null = null;
+    let bestAddition: PassageEntry | null = null;
     let bestValue = 0;
 
-    for (const candidate of scored) {
+    for (const candidate of ranked) {
       if (selected.includes(candidate) || candidate.score < 1) {
         continue;
       }
@@ -409,10 +441,20 @@ export function coverageExcerpt(text: string, terms: string[], maxChars: number)
 
       const lower = candidate.passage.toLowerCase();
       const newTokens = queryTokens.filter((token) => !covered.has(token) && lower.includes(token)).length;
+      let novelEntities = 0;
+      for (const phrase of candidate.entities) {
+        if (!coveredEntities.has(phrase)) {
+          novelEntities += 1;
+        }
+      }
       const maxSimilarity = Math.max(
         ...selected.map((entry) => jaccardSimilarity(candidate.tokens, entry.tokens))
       );
-      const value = (candidate.score + COVERAGE_NEW_TOKEN_BONUS * newTokens) * (1 - maxSimilarity);
+      const value =
+        (candidate.score +
+          COVERAGE_NEW_TOKEN_BONUS * newTokens +
+          ENTITY_NOVELTY_BONUS * Math.min(novelEntities, ENTITY_NOVELTY_CAP)) *
+        (1 - maxSimilarity);
 
       if (value > bestValue) {
         bestAddition = candidate;
@@ -430,10 +472,28 @@ export function coverageExcerpt(text: string, terms: string[], maxChars: number)
         covered.add(token);
       }
     }
+    for (const phrase of bestAddition.entities) {
+      coveredEntities.add(phrase);
+    }
     usedChars += COVERAGE_SEPARATOR.length + bestAddition.passage.length;
   }
 
-  const joined = selected
+  return selected;
+}
+
+function buildPassageEntries(text: string, terms: string[], maxChars: number): PassageEntry[] {
+  const passages = splitIntoPassages(text, Math.max(400, Math.min(COVERAGE_PASSAGE_TARGET_CHARS, maxChars)));
+  return passages.map((passage, index) => ({
+    passage,
+    index,
+    score: passageScore(passage, terms),
+    tokens: new Set(tokenize(passage)),
+    entities: entityPhrases(passage)
+  }));
+}
+
+function joinSelection(selected: PassageEntry[], terms: string[], maxChars: number): { excerpt: string; score: number } {
+  const joined = [...selected]
     .sort((a, b) => a.index - b.index)
     .map((entry) => entry.passage)
     .join(COVERAGE_SEPARATOR);
@@ -443,4 +503,57 @@ export function coverageExcerpt(text: string, terms: string[], maxChars: number)
     excerpt,
     score: passageScore(excerpt, terms)
   };
+}
+
+export function coverageExcerpt(text: string, terms: string[], maxChars: number): { excerpt: string; score: number } {
+  const entries = buildPassageEntries(text, terms, maxChars);
+
+  if (entries.length === 0) {
+    return { excerpt: "", score: 0 };
+  }
+
+  const queryTokens = uniqueTerms(tokenize(terms.join(" "))).map((token) => token.toLowerCase());
+  return joinSelection(selectCoveragePassages(entries, queryTokens, maxChars), terms, maxChars);
+}
+
+/**
+ * Up to `count` non-overlapping excerpts from one document, each built with
+ * the coverage/diversity selection above. A long document's specifics (program
+ * descriptions, entity lists) usually live outside the passages a single
+ * excerpt can hold; the second round runs on the remaining passages, so what
+ * round one skipped — typically the specifics — fills the next excerpt. The
+ * caller decides how many excerpts fit its result budget.
+ */
+export function coverageExcerpts(
+  text: string,
+  terms: string[],
+  maxChars: number,
+  count: number
+): Array<{ excerpt: string; score: number }> {
+  let entries = buildPassageEntries(text, terms, maxChars);
+
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const queryTokens = uniqueTerms(tokenize(terms.join(" "))).map((token) => token.toLowerCase());
+  const output: Array<{ excerpt: string; score: number }> = [];
+
+  for (let round = 0; round < count && entries.length > 0; round += 1) {
+    const hasScoringPassage = entries.some((entry) => entry.score > 0);
+    if (round > 0 && !hasScoringPassage) {
+      break;
+    }
+
+    const selected = selectCoveragePassages(entries, queryTokens, maxChars);
+    const joined = joinSelection(selected, terms, maxChars);
+    if (!joined.excerpt) {
+      break;
+    }
+
+    output.push(joined);
+    entries = entries.filter((entry) => !selected.includes(entry));
+  }
+
+  return output;
 }

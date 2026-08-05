@@ -8,7 +8,7 @@ import {
   candidatePriority,
   clampPositiveInteger,
   confidenceFromScore,
-  coverageExcerpt,
+  coverageExcerpts,
   extractYear,
   inferDocumentType,
   inferFunder,
@@ -274,37 +274,42 @@ export class GrantSearchService {
 
     for (let index = 0; index < candidatesToInspect.length; index += downloadConcurrency) {
       const batch = candidatesToInspect.slice(index, index + downloadConcurrency);
-      const batchResults = await Promise.all(batch.map(async (candidate): Promise<RankedResult | null> => {
+      const batchResults = await Promise.all(batch.map(async (candidate): Promise<RankedResult[]> => {
         try {
           const downloaded = await this.sourceRepository.downloadText(candidate.path);
-          const excerpt = coverageExcerpt(downloaded.text, terms, maxChars);
-          if (!excerpt.excerpt) {
-            return null;
-          }
-
+          // Two non-overlapping excerpts per document: long documents keep
+          // their specifics (program descriptions, entity lists) outside the
+          // passages a single excerpt can hold. The final sort/slice keeps
+          // secondary excerpts only when result slots remain.
+          const excerpts = coverageExcerpts(downloaded.text, terms, maxChars, 2);
           const priorityScore = this.candidateSearchPriority(candidate, terms);
-          const score = passageScore(excerpt.excerpt, terms) + Math.floor(priorityScore / 3);
 
-          return {
-            ...this.sourceMetadata(candidate),
-            source_file: candidate.source_file,
-            funder: inferFunder(candidate),
-            year: extractYear(candidate),
-            path: candidate.path,
-            excerpt: excerpt.excerpt,
-            confidence: confidenceFromScore(score),
-            document_type: inferDocumentType(candidate),
-            character_count: excerpt.excerpt.length,
-            notes: options.note,
-            score,
-            freshnessScore: this.freshnessScore(candidate.path)
-          };
+          return excerpts
+            .filter((entry) => entry.excerpt)
+            .map((entry, excerptIndex) => {
+              const score = passageScore(entry.excerpt, terms) + Math.floor(priorityScore / 3);
+
+              return {
+                ...this.sourceMetadata(candidate),
+                source_file: candidate.source_file,
+                funder: inferFunder(candidate),
+                year: extractYear(candidate),
+                path: candidate.path,
+                excerpt: entry.excerpt,
+                confidence: confidenceFromScore(score),
+                document_type: inferDocumentType(candidate),
+                character_count: entry.excerpt.length,
+                notes: excerptIndex === 0 ? options.note : `${options.note} Additional excerpt from the same source.`,
+                score,
+                freshnessScore: this.freshnessScore(candidate.path)
+              };
+            });
         } catch {
-          return null;
+          return [];
         }
       }));
 
-      rankedResults.push(...batchResults.filter((result): result is RankedResult => result !== null));
+      rankedResults.push(...batchResults.flat());
       if (rankedResults.length >= maxResults * 2) {
         break;
       }
