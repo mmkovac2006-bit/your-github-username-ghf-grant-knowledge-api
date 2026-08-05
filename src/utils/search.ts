@@ -177,6 +177,20 @@ export function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) {
+    return 0;
+  }
+
+  let count = 0;
+  let index = haystack.indexOf(needle);
+  while (index !== -1) {
+    count += 1;
+    index = haystack.indexOf(needle, index + needle.length);
+  }
+  return count;
+}
+
 export function passageScore(passage: string, terms: string[]): number {
   const lower = passage.toLowerCase();
   let score = 0;
@@ -193,9 +207,9 @@ export function passageScore(passage: string, terms: string[]): number {
   }
 
   for (const token of tokenize(terms.join(" "))) {
-    if (lower.includes(token)) {
-      score += 1;
-    }
+    // Frequency-weighted (capped) so a passage that discusses a topic
+    // repeatedly outranks one that mentions it in passing.
+    score += Math.min(countOccurrences(lower, token), 3);
   }
 
   return score;
@@ -317,5 +331,83 @@ export function bestExcerpt(text: string, terms: string[], maxChars: number): { 
   return {
     excerpt: truncateAtWord(scored[0].passage, maxChars),
     score: scored[0].score
+  };
+}
+
+const COVERAGE_SEPARATOR = " […] ";
+const COVERAGE_MAX_EXTRA_PASSAGES = 2;
+const COVERAGE_MIN_REMAINING_CHARS = 160;
+
+/**
+ * Coverage-aware excerpt selection. Starts from the single best passage, then
+ * greedily appends passages that cover query tokens the excerpt does not yet
+ * cover, within the character budget. This keeps one strong paragraph from
+ * hiding the rest of a document: a broad question about "programs" now pulls
+ * the program-list paragraph alongside the highest-scoring narrative
+ * paragraph instead of returning only one of them.
+ */
+export function coverageExcerpt(text: string, terms: string[], maxChars: number): { excerpt: string; score: number } {
+  const passages = splitIntoPassages(text, maxChars);
+
+  if (passages.length === 0) {
+    return { excerpt: "", score: 0 };
+  }
+
+  const queryTokens = uniqueTerms(tokenize(terms.join(" "))).map((token) => token.toLowerCase());
+  const scored = passages
+    .map((passage, index) => ({ passage, index, score: passageScore(passage, terms) }))
+    .sort((a, b) => b.score - a.score || b.passage.length - a.passage.length);
+
+  const selected = [scored[0]];
+  const covered = new Set(queryTokens.filter((token) => scored[0].passage.toLowerCase().includes(token)));
+  let usedChars = scored[0].passage.length;
+
+  for (let additions = 0; additions < COVERAGE_MAX_EXTRA_PASSAGES; additions += 1) {
+    if (maxChars - usedChars < COVERAGE_MIN_REMAINING_CHARS) {
+      break;
+    }
+
+    let bestAddition: (typeof scored)[number] | null = null;
+    let bestNewTokens = 0;
+
+    for (const candidate of scored) {
+      if (selected.includes(candidate)) {
+        continue;
+      }
+
+      const lower = candidate.passage.toLowerCase();
+      const newTokens = queryTokens.filter((token) => !covered.has(token) && lower.includes(token)).length;
+
+      if (
+        newTokens > bestNewTokens ||
+        (newTokens === bestNewTokens && newTokens > 0 && bestAddition !== null && candidate.score > bestAddition.score)
+      ) {
+        bestAddition = candidate;
+        bestNewTokens = newTokens;
+      }
+    }
+
+    if (!bestAddition || bestNewTokens === 0) {
+      break;
+    }
+
+    selected.push(bestAddition);
+    for (const token of queryTokens) {
+      if (bestAddition.passage.toLowerCase().includes(token)) {
+        covered.add(token);
+      }
+    }
+    usedChars += COVERAGE_SEPARATOR.length + bestAddition.passage.length;
+  }
+
+  const joined = selected
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => entry.passage)
+    .join(COVERAGE_SEPARATOR);
+  const excerpt = truncateAtWord(joined, maxChars);
+
+  return {
+    excerpt,
+    score: passageScore(excerpt, terms)
   };
 }
