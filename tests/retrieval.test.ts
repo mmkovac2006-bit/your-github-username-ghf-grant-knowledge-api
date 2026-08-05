@@ -1,7 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
-import { coverageExcerpt, passageScore } from "../src/utils/search";
+import { coverageExcerpt, coverageExcerpts, passageScore } from "../src/utils/search";
 import { createConfig, DEFAULT_DROPBOX_ALLOWED_ROOTS, type AppConfig } from "../src/utils/config";
 import { MockDropboxRepository, type MockDropboxFile } from "./mockDropboxRepository";
 
@@ -132,6 +132,38 @@ describe("coverageExcerpt diversity selection", () => {
     const result = coverageExcerpt(duplicated, ["programs", "students"], 2000);
 
     expect(result.excerpt.split("[…]").length).toBe(1);
+  });
+});
+
+describe("coverageExcerpts multi-round selection", () => {
+  it("carries a document's specifics in the second excerpt when dense narrative wins the first", () => {
+    // Real-world shape: many token-dense narrative paragraphs outrank the
+    // program-description paragraphs, so one excerpt cannot carry both.
+    const narrative = Array.from({ length: 6 }, (_, i) =>
+      `Section ${i + 1}: The mental health education landscape for children and youth continues to evolve, and the Foundation delivers mental health education programs, mental health training, and youth mental health support across school communities in North Texas.`
+    );
+    const specifics = [
+      "Early Risers is a ten-week program for Pre-K through third grade students built on stories, creative arts, and play.",
+      "Building Blocks of Mental Health offers interactive presentations for students in grades 4-12."
+    ];
+    const text = [...narrative, ...specifics].join("\n\n");
+
+    const excerpts = coverageExcerpts(text, ["mental", "health", "education", "programs", "children", "youth"], 2000, 2);
+    const union = excerpts.map((entry) => entry.excerpt).join(" ");
+
+    expect(excerpts.length).toBeGreaterThan(1);
+    expect(union).toContain("Early Risers");
+    expect(union).toContain("Building Blocks of Mental Health");
+  });
+
+  it("returns non-overlapping excerpts", () => {
+    const excerpts = coverageExcerpts(threeProgramText, ["programs", "children", "youth"], 900, 2);
+    if (excerpts.length > 1) {
+      const first = new Set(excerpts[0].excerpt.split("[…]").map((s) => s.trim().slice(0, 60)));
+      for (const piece of excerpts[1].excerpt.split("[…]")) {
+        expect(first.has(piece.trim().slice(0, 60))).toBe(false);
+      }
+    }
   });
 });
 
