@@ -251,7 +251,9 @@ export class GrantSearchService {
   }
 
   private searchExcerptLimit(value?: number): number {
-    return clampPositiveInteger(value, Math.min(1200, this.config.maxExcerptChars), this.config.maxExcerptChars);
+    // Default excerpt budget must fit several diverse passages, not one; the
+    // coverage selection in coverageExcerpt depends on this headroom.
+    return clampPositiveInteger(value, Math.min(2000, this.config.maxExcerptChars), this.config.maxExcerptChars);
   }
 
   private async resultsFromCandidates(
@@ -260,7 +262,7 @@ export class GrantSearchService {
     maxResults: number,
     options: { maxChars?: number; note: string }
   ): Promise<SearchResult[]> {
-    const maxChars = options.maxChars ?? Math.min(1200, this.config.maxExcerptChars);
+    const maxChars = options.maxChars ?? Math.min(2000, this.config.maxExcerptChars);
     const rankedCandidates = candidates
       .filter((candidate) => this.isCandidateAllowed(candidate))
       .filter((candidate) => isSupportedFile(candidate.source_file))
