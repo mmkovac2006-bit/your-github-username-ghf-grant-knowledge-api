@@ -335,16 +335,38 @@ export function bestExcerpt(text: string, terms: string[], maxChars: number): { 
 }
 
 const COVERAGE_SEPARATOR = " […] ";
-const COVERAGE_MAX_EXTRA_PASSAGES = 2;
+const COVERAGE_MAX_EXTRA_PASSAGES = 3;
 const COVERAGE_MIN_REMAINING_CHARS = 160;
+const COVERAGE_OVERFLOW_ALLOWANCE = 200;
+const COVERAGE_NEW_TOKEN_BONUS = 2;
+const COVERAGE_MIN_ADDITION_VALUE = 1;
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) {
+    return 0;
+  }
+
+  let intersection = 0;
+  for (const token of a) {
+    if (b.has(token)) {
+      intersection += 1;
+    }
+  }
+
+  return intersection / (a.size + b.size - intersection);
+}
 
 /**
  * Coverage-aware excerpt selection. Starts from the single best passage, then
- * greedily appends passages that cover query tokens the excerpt does not yet
- * cover, within the character budget. This keeps one strong paragraph from
- * hiding the rest of a document: a broad question about "programs" now pulls
- * the program-list paragraph alongside the highest-scoring narrative
- * paragraph instead of returning only one of them.
+ * greedily appends further passages using a relevance-with-diversity rule:
+ * a candidate's value is its query relevance (plus a bonus for covering query
+ * tokens the excerpt does not yet contain) scaled down by its textual
+ * similarity to the passages already selected. This keeps one strong
+ * paragraph from hiding the rest of a document, and — unlike pure new-token
+ * coverage — still adds passages that match the same query tokens but carry
+ * different content (e.g. a second program's description for a broad
+ * "programs" question, or a county-name list after an intro that already
+ * mentions "counties").
  */
 export function coverageExcerpt(text: string, terms: string[], maxChars: number): { excerpt: string; score: number } {
   const passages = splitIntoPassages(text, maxChars);
@@ -355,7 +377,12 @@ export function coverageExcerpt(text: string, terms: string[], maxChars: number)
 
   const queryTokens = uniqueTerms(tokenize(terms.join(" "))).map((token) => token.toLowerCase());
   const scored = passages
-    .map((passage, index) => ({ passage, index, score: passageScore(passage, terms) }))
+    .map((passage, index) => ({
+      passage,
+      index,
+      score: passageScore(passage, terms),
+      tokens: new Set(tokenize(passage))
+    }))
     .sort((a, b) => b.score - a.score || b.passage.length - a.passage.length);
 
   const selected = [scored[0]];
@@ -363,31 +390,37 @@ export function coverageExcerpt(text: string, terms: string[], maxChars: number)
   let usedChars = scored[0].passage.length;
 
   for (let additions = 0; additions < COVERAGE_MAX_EXTRA_PASSAGES; additions += 1) {
-    if (maxChars - usedChars < COVERAGE_MIN_REMAINING_CHARS) {
+    const remaining = maxChars - usedChars;
+    if (remaining < COVERAGE_MIN_REMAINING_CHARS) {
       break;
     }
 
     let bestAddition: (typeof scored)[number] | null = null;
-    let bestNewTokens = 0;
+    let bestValue = 0;
 
     for (const candidate of scored) {
-      if (selected.includes(candidate)) {
+      if (selected.includes(candidate) || candidate.score < 1) {
+        continue;
+      }
+
+      if (candidate.passage.length > remaining + COVERAGE_OVERFLOW_ALLOWANCE) {
         continue;
       }
 
       const lower = candidate.passage.toLowerCase();
       const newTokens = queryTokens.filter((token) => !covered.has(token) && lower.includes(token)).length;
+      const maxSimilarity = Math.max(
+        ...selected.map((entry) => jaccardSimilarity(candidate.tokens, entry.tokens))
+      );
+      const value = (candidate.score + COVERAGE_NEW_TOKEN_BONUS * newTokens) * (1 - maxSimilarity);
 
-      if (
-        newTokens > bestNewTokens ||
-        (newTokens === bestNewTokens && newTokens > 0 && bestAddition !== null && candidate.score > bestAddition.score)
-      ) {
+      if (value > bestValue) {
         bestAddition = candidate;
-        bestNewTokens = newTokens;
+        bestValue = value;
       }
     }
 
-    if (!bestAddition || bestNewTokens === 0) {
+    if (!bestAddition || bestValue < COVERAGE_MIN_ADDITION_VALUE) {
       break;
     }
 

@@ -91,6 +91,50 @@ describe("coverageExcerpt", () => {
   });
 });
 
+// Mirrors the two live cases that survived the first coverage fix: passages
+// sharing the SAME query tokens (three programs all matching "programs") and
+// an entity list whose items are not query terms (county names).
+const threeProgramText = [
+  "Grant Halliburton Foundation delivers school-based mental health education programs that build resilience and encourage help-seeking for children and youth across North Texas.",
+  "Building Blocks of Mental Health is our flagship education program, offering interactive presentations for students in grades 4-12 on stress, anxiety, and suicide prevention.",
+  "Early Risers is a ten-week program for Pre-K through third grade students that builds emotional resilience through stories, creative arts, and play before crises arise.",
+  "Peer Helpers PLUS is a peer-to-peer program for grades K-12 that trains student leaders to recognize distress and connect classmates with trusted adults."
+].join("\n\n");
+
+const countyText = [
+  "During the 2025-2026 school year, Peer Helpers PLUS operated in schools across five counties in North Texas, reaching thousands of students with prevention programming.",
+  "Participating campuses were located in Collin, Denton, Fannin, Grayson, and Dallas counties, including districts in Sherman and Denison.",
+  "Program coordinators reported strong engagement from students and campus staff throughout the year."
+].join("\n\n");
+
+describe("coverageExcerpt diversity selection", () => {
+  it("includes all three program descriptions for a broad programs query", () => {
+    const result = coverageExcerpt(threeProgramText, ["education", "programs", "children", "youth"], 2000);
+
+    expect(result.excerpt).toContain("Building Blocks of Mental Health");
+    expect(result.excerpt).toContain("Early Risers");
+    expect(result.excerpt).toContain("Peer Helpers PLUS");
+  });
+
+  it("adds an entity-list passage even when it introduces no new query tokens", () => {
+    const result = coverageExcerpt(countyText, ["counties", "schools", "serve"], 2000);
+
+    expect(result.excerpt).toContain("five counties");
+    expect(result.excerpt).toContain("Collin, Denton, Fannin, Grayson, and Dallas");
+  });
+
+  it("does not append near-duplicate passages", () => {
+    const duplicated = [
+      "Our programs serve students across North Texas with mental health education and prevention.",
+      "Our programs serve students across North Texas with mental health education and prevention efforts.",
+      "Unrelated administrative text with no relevant terms at all."
+    ].join("\n\n");
+    const result = coverageExcerpt(duplicated, ["programs", "students"], 2000);
+
+    expect(result.excerpt.split("[…]").length).toBe(1);
+  });
+});
+
 describe("search endpoint retrieval consistency", () => {
   it("surfaces program names for a broad program question", async () => {
     const app = createApp({
